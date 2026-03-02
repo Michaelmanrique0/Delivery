@@ -5,19 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Gestión de Pedidos - Delivery App</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
 <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 <div class="container">
-  <h1>🚚 Gestión de Pedidos Delivery</h1>
+  <h1>Gestión de Pedidos Delivery</h1>
 
   <div class="section sync-section">
-    <h2>🔄 Sincronizar Datos</h2>
+    <h2>Sincronizar Datos</h2>
     <div class="sync-buttons">
-      <button class="btn-sync" onclick="exportarDatos()">📤 Exportar Datos</button>
-      <button class="btn-sync" onclick="importarDatos()">📥 Importar Datos</button>
-      <button class="btn-sync" onclick="mostrarQR()">📱 Mostrar QR</button>
+      <button class="btn-sync" onclick="exportarDatos()"><i class="fa-solid fa-file-export"></i> Exportar Datos</button>
+      <button class="btn-sync" onclick="importarDatos()"><i class="fa-solid fa-file-import"></i> Importar Datos</button>
+      <button class="btn-sync" onclick="mostrarQR()"><i class="fa-solid fa-qrcode"></i> Mostrar QR</button>
     </div>
     <div class="sync-code-area" id="syncCodeArea" style="display: none;">
       <textarea id="syncData" placeholder="Pega aquí el código de sincronización o escanea el QR..."></textarea>
@@ -36,7 +37,7 @@
   </div>
 
   <div class="section">
-    <h2>📋 Pegar Formato de Pedido</h2>
+    <h2>Pegar Formato de Pedido</h2>
     <textarea id="textoPedido" placeholder="Pega aquí el formato del pedido (incluye el enlace de Maps)..."></textarea>
     <br><br>
     <button class="btn-primary" onclick="procesarPedido()">Procesar Pedido</button>
@@ -44,8 +45,8 @@
 
   <div class="section">
     <div class="actions-bar">
-      <h2 style="margin: 0; border: none; padding: 0;">📦 Lista de Pedidos</h2>
-      <button class="btn-danger" onclick="eliminarTodos()">🗑️ Eliminar Todos</button>
+      <h2 style="margin: 0; border: none; padding: 0;">Lista de Pedidos</h2>
+      <button class="btn-danger" onclick="eliminarTodos()"><i class="fa-solid fa-trash"></i> Eliminar Todos</button>
     </div>
     <div class="totales-resumen" id="totalesResumen" style="display: none;">
       <div class="total-item total-recogido-dia">
@@ -58,6 +59,11 @@
         🏪 A entregar a tienda: $<span id="totalEntregarTienda">0</span>
       </div>
     </div>
+    <div class="pedidos-tabs" id="pedidosTabs">
+      <button class="pedidos-tab active" onclick="cambiarVistaPedidos('pendientes')"><i class="fa-regular fa-clock"></i> Pendientes</button>
+      <button class="pedidos-tab" onclick="cambiarVistaPedidos('enCurso')"><i class="fa-solid fa-truck-fast"></i> En curso</button>
+      <button class="pedidos-tab" onclick="cambiarVistaPedidos('entregados')"><i class="fa-solid fa-circle-check"></i> Finalizados</button>
+    </div>
     <div id="listaPedidos">
       <div class="empty-state" id="emptyState">
         <p>No hay pedidos aún</p>
@@ -67,7 +73,7 @@
   </div>
 
   <div class="section">
-    <h2>🗺️ Mapa de Entregas</h2>
+    <h2>Mapa de Entregas</h2>
     <div class="mapa-con-orden">
       <div id="mapa" class="mapa-container"></div>
       <div class="orden-entrega-panel">

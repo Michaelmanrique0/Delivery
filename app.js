@@ -4,6 +4,7 @@ let marcadores = [];
 let rutaLayer = null;
 let mapaAjustado = false;
 let nextPedidoId = 1;
+let vistaPedidosActual = 'pendientes';
 
 function initMap() {
   mapa = L.map('mapa').setView([4.6097, -74.0817], 12);
@@ -176,7 +177,7 @@ async function procesarPedido() {
 
   const btnProcesar = document.querySelector('.btn-primary');
   const textoOriginalBtn = btnProcesar ? btnProcesar.textContent : '';
-  if (btnProcesar) { btnProcesar.textContent = '⏳ Procesando...'; btnProcesar.disabled = true; }
+  if (btnProcesar) { btnProcesar.textContent = 'Procesando...'; btnProcesar.disabled = true; }
 
   const coords = await obtenerCoordenadas(mapUrl, campos.direccion);
 
@@ -202,6 +203,8 @@ async function procesarPedido() {
     textoOriginal: texto,
     mapUrl: mapUrlFinal,
     coords: { lat: coords.lat, lng: coords.lng },
+    enCurso: false,
+    posicionPendiente: null,
     entregado: false,
     noEntregado: false,
     envioRecogido: false
@@ -249,7 +252,7 @@ async function procesarMultiplesPedidos(texto) {
     const numeroPedido = numMatch ? parseInt(numMatch[1]) : null;
     const campos = extraerCamposPedido(bloque);
 
-    if (btnProcesar) { btnProcesar.textContent = `⏳ Procesando pedido ${numLabel}...`; btnProcesar.disabled = true; }
+    if (btnProcesar) { btnProcesar.textContent = `Procesando pedido ${numLabel}...`; btnProcesar.disabled = true; }
 
     const coords = await obtenerCoordenadas(mapUrl, campos.direccion);
     if (!coords) {
@@ -272,6 +275,8 @@ async function procesarMultiplesPedidos(texto) {
       textoOriginal: bloque.trim(),
       mapUrl: mapUrlFinal,
       coords: { lat: coords.lat, lng: coords.lng },
+      enCurso: false,
+      posicionPendiente: null,
       entregado: false,
       noEntregado: false,
       envioRecogido: false
@@ -289,7 +294,7 @@ async function procesarMultiplesPedidos(texto) {
     document.getElementById("textoPedido").value = "";
   }
 
-  let msg = `✅ Se agregaron ${agregados} pedido(s)`;
+  let msg = `Se agregaron ${agregados} pedido(s)`;
   if (errores.length > 0) {
     msg += `\n\n⚠️ ${errores.length} pedido(s) no agregado(s):\n${errores.join('\n')}`;
   }
@@ -302,73 +307,51 @@ function guardarPedidos() {
 
 function renderPedidos() {
   const lista = document.getElementById("listaPedidos");
+  const tabs = document.querySelectorAll('#pedidosTabs .pedidos-tab');
+  const pendientes = [];
+  const enCurso = [];
+  const entregados = [];
+  pedidos.forEach((pedido, index) => {
+    if (pedido.entregado) entregados.push({ pedido, index });
+    else if (pedido.enCurso) enCurso.push({ pedido, index });
+    else pendientes.push({ pedido, index });
+  });
+
+  tabs.forEach(btn => {
+    const onClick = btn.getAttribute('onclick') || '';
+    if (onClick.includes("'pendientes'")) {
+      btn.innerHTML = `<i class="fa-regular fa-clock"></i> Pendientes (${pendientes.length})`;
+    } else if (onClick.includes("'enCurso'")) {
+      btn.innerHTML = `<i class="fa-solid fa-truck-fast"></i> En curso (${enCurso.length})`;
+    } else if (onClick.includes("'entregados'")) {
+      btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Finalizados (${entregados.length})`;
+    }
+  });
 
   if (pedidos.length === 0) {
     lista.innerHTML = '<div class="empty-state" id="emptyState"><p>No hay pedidos aún</p><p style="font-size: 14px;">Pega un formato de pedido arriba para comenzar</p></div>';
+    tabs.forEach(btn => {
+      const activa = btn.getAttribute('onclick')?.includes(`'${vistaPedidosActual}'`);
+      btn.classList.toggle('active', !!activa);
+    });
     renderListaOrdenEntrega();
     return;
   }
 
   lista.innerHTML = "";
 
-  pedidos.forEach((pedido, index) => {
-    const div = document.createElement("div");
-    div.className = "pedido" + (pedido.entregado ? " entregado" : "");
-    div.draggable = !pedido.entregado;
-    div.dataset.index = index;
-    div.dataset.id = pedido.id;
-
-    const telefonoLimpio = pedido.telefono ? pedido.telefono.replace(/\D/g, '') : '';
-    const valorFormato = parseInt(pedido.valor || 0).toLocaleString('es-CO');
-    const btnNoEntregadoHtml = pedido.entregado
-      ? `<div class="pedido-no-entregado-wrap"><button class="btn-warning" onclick="marcarNoEntregado(${index})" style="width: 100%;">↩️ No entregado</button></div>`
-      : '';
-
-    const estadoTexto = pedido.entregado
-      ? (pedido.noEntregado ? ' ✕ No entregado' : ' ✓ Entregado')
-      : '';
-
-    div.innerHTML = `
-      <div class="pedido-header">
-        <div class="pedido-numero">Pedido #${pedido.id}${estadoTexto}</div>
-        <div class="pedido-header-btns">
-          <button class="btn-edit" onclick="editarPedido(${index})" style="padding: 5px 10px; font-size: 12px;">✏️ Editar</button>
-          <button class="btn-danger" onclick="eliminarPedido(${index})" style="padding: 5px 10px; font-size: 12px;">✕ Eliminar</button>
-        </div>
-      </div>
-      <div class="pedido-info">
-        <strong>👤 Nombre:</strong> ${pedido.nombre || 'No especificado'}<br>
-        <strong>📞 Teléfono:</strong> ${pedido.telefono || 'No especificado'}<br>
-        <strong>📍 Dirección:</strong> ${pedido.direccion || 'No especificada'}<br>
-        <strong>🎁 Productos:</strong> ${pedido.productos && pedido.productos.length > 0 ? pedido.productos.join(', ') : 'No especificado'}<br>
-        <strong>💰 Valor:</strong> $${valorFormato}<br>
-        <strong>🔗 URL Maps:</strong> <span style="font-size:12px;word-break:break-all;">${pedido.mapUrl ? pedido.mapUrl.substring(0, 50) + '...' : 'No especificada'}</span><br>
-      </div>
-      <div class="pedido-buttons">
-        <button class="btn-success" onclick="whatsappLlamar('${telefonoLimpio}')">📞 WhatsApp Llamar</button>
-        <button class="btn-success" onclick="whatsappMensaje('${telefonoLimpio}')">💬 WhatsApp Mensaje</button>
-        <button class="btn-info" onclick="llamar('${telefonoLimpio}')">📱 Llamar Normal</button>
-      </div>
-      <div class="pedido-actions">
-        <div class="pedido-actions-row">
-          <button class="btn-camera" onclick="fotoEntregado(${index}, ${pedido.id})">✅ Foto Entregado</button>
-          <button class="btn-camera" onclick="fotoNoEntregado(${index}, ${pedido.id})">❌ Foto No Entregado</button>
-        </div>
-        <div class="pedido-actions-row">
-          <button class="btn-route" onclick="enrutarConMaps(${index}, ${pedido.id})">🗺️ Maps</button>
-          <button class="btn-route" onclick="enrutarConWaze(${index}, ${pedido.id})">📍 Waze</button>
-          <button class="btn-notify" onclick="notificarEnCamino(${index}, ${pedido.id})">📢 Notificar en Camino</button>
-        </div>
-      </div>
-      ${btnNoEntregadoHtml}
-    `;
-
-    div.addEventListener('dragstart', handleDragStart);
-    div.addEventListener('dragover', handleDragOver);
-    div.addEventListener('drop', handleDrop);
-    div.addEventListener('dragend', handleDragEnd);
-    lista.appendChild(div);
+  tabs.forEach(btn => {
+    const activa = btn.getAttribute('onclick')?.includes(`'${vistaPedidosActual}'`);
+    btn.classList.toggle('active', !!activa);
   });
+
+  if (vistaPedidosActual === 'enCurso') {
+    lista.appendChild(crearSeccionPedidos('seccion-en-curso', enCurso, 'No hay pedidos en curso'));
+  } else if (vistaPedidosActual === 'entregados') {
+    lista.appendChild(crearSeccionPedidos('seccion-entregados', entregados, 'No hay pedidos entregados'));
+  } else {
+    lista.appendChild(crearSeccionPedidos('seccion-pendientes', pendientes, 'No hay pedidos pendientes'));
+  }
 
   const recogidoDelDia = pedidos.filter(p => p.entregado && !p.noEntregado).reduce((sum, p) => sum + parseInt(p.valor || 0, 10), 0);
   const enviosEntregados = pedidos.filter(p => p.entregado && !p.noEntregado).length;
@@ -387,13 +370,111 @@ function renderPedidos() {
   renderListaOrdenEntrega();
 }
 
+function cambiarVistaPedidos(vista) {
+  if (!['pendientes', 'enCurso', 'entregados'].includes(vista)) return;
+  vistaPedidosActual = vista;
+  renderPedidos();
+}
+
+function crearSeccionPedidos(claseExtra, items, textoVacio) {
+  const seccion = document.createElement('div');
+  seccion.className = `pedidos-seccion ${claseExtra}`;
+
+  const contenido = document.createElement('div');
+  contenido.className = 'pedidos-seccion-lista';
+
+  if (items.length === 0) {
+    contenido.innerHTML = `<div class="empty-state" style="padding:20px;"><p style="font-size:15px;">${textoVacio}</p></div>`;
+  } else {
+    items.forEach(({ pedido, index }) => contenido.appendChild(crearTarjetaPedido(pedido, index)));
+  }
+
+  seccion.appendChild(contenido);
+  return seccion;
+}
+
+function crearTarjetaPedido(pedido, index) {
+  const div = document.createElement("div");
+  div.className = "pedido" + (pedido.entregado ? " entregado" : "") + (pedido.enCurso && !pedido.entregado ? " en-curso" : "");
+  div.draggable = !pedido.entregado;
+  div.dataset.index = index;
+  div.dataset.id = pedido.id;
+
+  const telefonoLimpio = pedido.telefono ? pedido.telefono.replace(/\D/g, '') : '';
+  const valorFormato = parseInt(pedido.valor || 0, 10).toLocaleString('es-CO');
+  const btnNoEntregadoHtml = pedido.entregado
+    ? `<div class="pedido-no-entregado-wrap"><button class="btn-warning" onclick="marcarNoEntregado(${index})" style="width: 100%;"><i class="fa-solid fa-rotate-left"></i> No entregado</button></div>`
+    : '';
+  const btnRegresarPendienteHtml = (!pedido.entregado && pedido.enCurso)
+    ? `<button class="btn-info" onclick="marcarPendiente(${index})"><i class="fa-solid fa-rotate-left"></i> Regresar a pendiente</button>`
+    : '';
+
+  const estadoTexto = pedido.entregado
+    ? (pedido.noEntregado ? ' - No entregado' : ' - Entregado')
+    : (pedido.enCurso ? ' - En curso' : '');
+
+  div.innerHTML = `
+    <div class="pedido-header">
+      <div class="pedido-numero">Pedido #${pedido.id}${estadoTexto}</div>
+      <div class="pedido-header-btns">
+        <button class="btn-edit" onclick="editarPedido(${index})" style="padding: 5px 10px; font-size: 12px;"><i class="fa-solid fa-pen-to-square"></i> Editar</button>
+        <button class="btn-danger" onclick="eliminarPedido(${index})" style="padding: 5px 10px; font-size: 12px;"><i class="fa-solid fa-trash"></i> Eliminar</button>
+      </div>
+    </div>
+    <div class="pedido-cliente">${pedido.nombre || 'Cliente no especificado'}</div>
+    <div class="pedido-info">
+      <strong>Teléfono:</strong> ${pedido.telefono || 'No especificado'}<br>
+      <strong>Dirección:</strong> ${pedido.direccion || 'No especificada'}<br>
+      <strong>Productos:</strong> ${pedido.productos && pedido.productos.length > 0 ? pedido.productos.join(', ') : 'No especificado'}<br>
+      <strong>Valor:</strong> $${valorFormato}<br>
+    </div>
+    <div class="pedido-tools">
+      <details class="pedido-dropdown">
+        <summary class="btn-info"><i class="fa-solid fa-address-book"></i> Contacto</summary>
+        <div class="pedido-dropdown-content">
+          <button class="btn-success" onclick="whatsappLlamar('${telefonoLimpio}')"><i class="fa-brands fa-whatsapp"></i> Llamar por WhatsApp</button>
+          <button class="btn-success" onclick="whatsappMensaje('${telefonoLimpio}')"><i class="fa-brands fa-whatsapp"></i> Mensaje por WhatsApp</button>
+          <button class="btn-info" onclick="llamar('${telefonoLimpio}')"><i class="fa-solid fa-phone"></i> Llamada normal</button>
+        </div>
+      </details>
+      <details class="pedido-dropdown">
+        <summary class="btn-route"><i class="fa-solid fa-route"></i> Navegación</summary>
+        <div class="pedido-dropdown-content">
+          <button class="btn-route" onclick="enrutarConMaps(${index}, ${pedido.id})"><i class="fa-solid fa-map-location-dot"></i> Google Maps</button>
+          <button class="btn-route" onclick="enrutarConWaze(${index}, ${pedido.id})"><i class="fa-solid fa-location-arrow"></i> Waze</button>
+        </div>
+      </details>
+      <details class="pedido-dropdown">
+        <summary class="btn-camera"><i class="fa-solid fa-camera"></i> Evidencia</summary>
+        <div class="pedido-dropdown-content">
+          <button class="btn-camera" onclick="fotoEntregado(${index}, ${pedido.id})"><i class="fa-solid fa-camera"></i> Foto entregado</button>
+          <button class="btn-camera" onclick="mostrarOpcionesNoEntregado(${index}, ${pedido.id})"><i class="fa-solid fa-camera-rotate"></i> Foto no entregado</button>
+        </div>
+      </details>
+    </div>
+    <div class="pedido-actions">
+      <div class="pedido-actions-row">
+        <button class="btn-notify" onclick="notificarEnCamino(${index}, ${pedido.id})"><i class="fa-solid fa-bullhorn"></i> Notificar en camino</button>
+      </div>
+      ${btnRegresarPendienteHtml ? `<div class="pedido-actions-row">${btnRegresarPendienteHtml}</div>` : ''}
+    </div>
+    ${btnNoEntregadoHtml}
+  `;
+
+  div.addEventListener('dragstart', handleDragStart);
+  div.addEventListener('dragover', handleDragOver);
+  div.addEventListener('drop', handleDrop);
+  div.addEventListener('dragend', handleDragEnd);
+  return div;
+}
+
 function renderListaOrdenEntrega() {
   const listaOrden = document.getElementById('listaOrdenEntrega');
   if (!listaOrden) return;
 
   const pedidosActivos = pedidos.filter(p => !p.entregado);
   if (pedidosActivos.length === 0) {
-    listaOrden.innerHTML = '<div class="orden-vacio">No hay pedidos pendientes</div>';
+    listaOrden.innerHTML = '<div class="orden-vacio">No hay pedidos activos</div>';
     return;
   }
 
@@ -505,8 +586,40 @@ function marcarEntregado(index) {
   const pedido = pedidos[index];
   if (!pedido) return;
   pedido.entregado = true;
+  pedido.enCurso = false;
+  pedido.posicionPendiente = null;
   pedidos.splice(index, 1);
   pedidos.push(pedido);
+  guardarPedidos();
+  renderPedidos();
+  actualizarMarcadores();
+}
+
+function marcarEnCurso(index) {
+  const pedido = pedidos[index];
+  if (!pedido || pedido.entregado) return;
+  if (pedido.posicionPendiente == null) pedido.posicionPendiente = index;
+  pedido.enCurso = true;
+  guardarPedidos();
+  renderPedidos();
+}
+
+function marcarPendiente(index) {
+  const pedido = pedidos[index];
+  if (!pedido || pedido.entregado) return;
+
+  const posicionOriginal = Number.isInteger(pedido.posicionPendiente)
+    ? pedido.posicionPendiente
+    : null;
+  pedido.enCurso = false;
+  pedido.posicionPendiente = null;
+
+  if (posicionOriginal !== null) {
+    const [movido] = pedidos.splice(index, 1);
+    const destino = Math.max(0, Math.min(posicionOriginal, pedidos.length));
+    pedidos.splice(destino, 0, movido);
+  }
+
   guardarPedidos();
   renderPedidos();
   actualizarMarcadores();
@@ -516,6 +629,8 @@ function marcarNoEntregado(index) {
   const pedido = pedidos[index];
   if (!pedido) return;
   pedido.entregado = false;
+  pedido.enCurso = false;
+  pedido.posicionPendiente = null;
   pedido.noEntregado = false;
   pedido.envioRecogido = false;
   pedidos.splice(index, 1);
@@ -599,20 +714,68 @@ function fotoEntregado(index, pedidoId) {
   marcarEntregado(index);
 }
 
-function fotoNoEntregado(index, pedidoId) {
-  const pedido = pedidos[index];
-  if (!pedido) return;
+let noEntregadoPendiente = { index: null, pedidoId: null };
 
-  const enUbicacion = confirm('¿Te encuentras en la ubicación del pedido?\n\n✅ Aceptar = Sí, estoy en el punto (se cobra envío $12.000)\n❌ Cancelar = No fui al punto (no se cobra envío)');
+function asegurarModalNoEntregado() {
+  let modal = document.getElementById('modalNoEntregado');
+  if (modal) return modal;
+
+  modal = document.createElement('div');
+  modal.id = 'modalNoEntregado';
+  modal.className = 'modal-no-entregado-backdrop';
+  modal.innerHTML = `
+    <div class="modal-no-entregado-card">
+      <h3>No entregado</h3>
+      <p>Selecciona una opción:</p>
+      <div class="modal-no-entregado-actions">
+        <button class="btn-warning" onclick="confirmarNoEntregado(true)">Sí fui al punto</button>
+        <button class="btn-info" onclick="confirmarNoEntregado(false)">No fui al punto</button>
+      </div>
+      <button class="modal-no-entregado-close" onclick="cerrarModalNoEntregado()">Cerrar</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function mostrarOpcionesNoEntregado(index, pedidoId) {
+  noEntregadoPendiente = { index, pedidoId };
+  const modal = asegurarModalNoEntregado();
+  modal.style.display = 'flex';
+}
+
+function cerrarModalNoEntregado() {
+  const modal = document.getElementById('modalNoEntregado');
+  if (!modal) return;
+  modal.style.display = 'none';
+}
+
+function confirmarNoEntregado(enUbicacion) {
+  const { index, pedidoId } = noEntregadoPendiente;
+  cerrarModalNoEntregado();
+  procesarFotoNoEntregado(index, pedidoId, enUbicacion);
+}
+
+function fotoNoEntregado(index, pedidoId) {
+  mostrarOpcionesNoEntregado(index, pedidoId);
+}
+
+function procesarFotoNoEntregado(index, pedidoId, enUbicacion) {
+  const indexActual = pedidos.findIndex(p => p.id === pedidoId);
+  const indexFinal = indexActual >= 0 ? indexActual : index;
+  const pedido = pedidos[indexFinal];
+  if (!pedido) return;
 
   const numeroAdmin = '573143473582';
   const mensaje = `Pedido #${pedidoId} no entregado`;
   window.open(`https://wa.me/${numeroAdmin}?text=${encodeURIComponent(mensaje)}`, '_blank');
 
   pedido.entregado = true;
+  pedido.enCurso = false;
+  pedido.posicionPendiente = null;
   pedido.noEntregado = true;
   pedido.envioRecogido = enUbicacion;
-  pedidos.splice(index, 1);
+  pedidos.splice(indexFinal, 1);
   pedidos.push(pedido);
   guardarPedidos();
   renderPedidos();
@@ -643,31 +806,37 @@ function getUbicacionPedido(index, pedidoId) {
 function enrutarConMaps(index, pedidoId) {
   const u = getUbicacionPedido(index, pedidoId);
   if (!u) { alert('No hay ubicación disponible para este pedido.'); return; }
+  marcarEnCurso(index);
   const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
   const isAndroid = /Android/.test(navigator.userAgent);
   if (u.lat != null && u.lng != null) {
     if (isIOS) {
-      window.location.href = `maps://maps.google.com/maps?daddr=${u.lat},${u.lng}&directionsmode=driving`;
-      setTimeout(() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${u.lat},${u.lng}&travelmode=driving`, '_blank'), 1000);
+      window.location.href = `comgooglemaps://?daddr=${u.lat},${u.lng}&directionsmode=driving`;
     } else if (isAndroid) {
       window.location.href = `google.navigation:q=${u.lat},${u.lng}`;
-      setTimeout(() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${u.lat},${u.lng}&travelmode=driving`, '_blank'), 1000);
     } else {
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${u.lat},${u.lng}&travelmode=driving`, '_blank');
     }
   } else {
-    window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(u.direccion)}&travelmode=driving`, '_blank');
+    const destino = encodeURIComponent(u.direccion);
+    if (isIOS) {
+      window.location.href = `comgooglemaps://?daddr=${destino}&directionsmode=driving`;
+    } else if (isAndroid) {
+      window.location.href = `google.navigation:q=${destino}`;
+    } else {
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${destino}&travelmode=driving`, '_blank');
+    }
   }
 }
 
 function enrutarConWaze(index, pedidoId) {
   const u = getUbicacionPedido(index, pedidoId);
   if (!u) { alert('No hay ubicación disponible para este pedido.'); return; }
+  marcarEnCurso(index);
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   if (u.lat != null && u.lng != null) {
     if (isMobile) {
       window.location.href = `waze://?ll=${u.lat},${u.lng}&navigate=yes`;
-      setTimeout(() => window.open(`https://waze.com/ul?ll=${u.lat},${u.lng}&navigate=yes`, '_blank'), 1000);
     } else {
       window.open(`https://waze.com/ul?ll=${u.lat},${u.lng}&navigate=yes`, '_blank');
     }
@@ -675,7 +844,6 @@ function enrutarConWaze(index, pedidoId) {
     const q = encodeURIComponent(u.direccion);
     if (isMobile) {
       window.location.href = `waze://?q=${q}&navigate=yes`;
-      setTimeout(() => window.open(`https://waze.com/ul?q=${q}&navigate=yes`, '_blank'), 1000);
     } else {
       window.open(`https://waze.com/ul?q=${q}&navigate=yes`, '_blank');
     }
@@ -925,11 +1093,12 @@ function compactarPedidos() {
     p.direccion || '',
     p.valor || '0',
     p.mapUrl || '',
-    (p.entregado ? 1 : 0) | (p.noEntregado ? 2 : 0) | (p.envioRecogido ? 4 : 0),
+    (p.entregado ? 1 : 0) | (p.noEntregado ? 2 : 0) | (p.envioRecogido ? 4 : 0) | (p.enCurso ? 8 : 0),
     (p.productos || []).join('|'),
     (p.coords && Number.isFinite(p.coords.lat) && Number.isFinite(p.coords.lng))
       ? `${p.coords.lat},${p.coords.lng}`
-      : ''
+      : '',
+    Number.isInteger(p.posicionPendiente) ? p.posicionPendiente : ''
   ]);
 }
 
@@ -948,8 +1117,9 @@ function descompactarPedidos(arr) {
     return ({
     id: c[0], nombre: c[1], telefono: c[2], direccion: c[3],
     valor: c[4], mapUrl: c[5],
-    entregado: !!(c[6] & 1), noEntregado: !!(c[6] & 2), envioRecogido: !!(c[6] & 4),
-    productos: c[7] ? c[7].split('|') : [], textoOriginal: '', coords
+    entregado: !!(c[6] & 1), noEntregado: !!(c[6] & 2), envioRecogido: !!(c[6] & 4), enCurso: !!(c[6] & 8),
+    productos: c[7] ? c[7].split('|') : [], textoOriginal: '', coords,
+    posicionPendiente: Number.isInteger(Number(c[9])) ? Number(c[9]) : null
   });
   });
 }
@@ -1038,9 +1208,12 @@ async function aplicarImportacion() {
 
     pedidos = listaPedidos.map(p => {
       if (!p.hasOwnProperty('mapUrl')) p.mapUrl = '';
+      if (!p.hasOwnProperty('enCurso')) p.enCurso = false;
+      if (!p.hasOwnProperty('posicionPendiente')) p.posicionPendiente = null;
       if (!p.hasOwnProperty('entregado')) p.entregado = false;
       if (!p.hasOwnProperty('noEntregado')) p.noEntregado = false;
       if (!p.hasOwnProperty('envioRecogido')) p.envioRecogido = false;
+      if (p.entregado) p.posicionPendiente = null;
       return p;
     });
 
@@ -1051,9 +1224,9 @@ async function aplicarImportacion() {
     document.getElementById('syncCodeArea').style.display = 'none';
     document.getElementById('qrContainer').style.display = 'none';
     document.getElementById('syncData').value = '';
-    alert(`✅ ${pedidos.length} pedido(s) importado(s) exitosamente!`);
+    alert(`${pedidos.length} pedido(s) importado(s) exitosamente.`);
   } catch (error) {
-    alert('❌ Error al importar datos. Verifica que el código sea correcto.\n\nError: ' + error.message);
+    alert('Error al importar datos. Verifica que el código sea correcto.\n\nError: ' + error.message);
   }
 }
 
@@ -1064,7 +1237,7 @@ async function mostrarQR() {
   if (pedidos.length === 0) { alert('No hay pedidos para generar QR'); return; }
 
   qrContainer.style.display = 'block';
-  qrEl.innerHTML = '<p style="padding:20px;text-align:center;">⏳ Comprimiendo datos...</p>';
+  qrEl.innerHTML = '<p style="padding:20px;text-align:center;">Comprimiendo datos...</p>';
 
   const textoQR = await comprimirParaQR();
 
@@ -1116,9 +1289,15 @@ window.onload = function () {
   pedidos = pedidos.map(p => {
     if (!p.hasOwnProperty('mapUrl')) p.mapUrl = '';
     if (!p.hasOwnProperty('coords') || !p.coords) p.coords = null;
+    if (!p.hasOwnProperty('enCurso')) p.enCurso = false;
+    if (!p.hasOwnProperty('posicionPendiente')) p.posicionPendiente = null;
     if (!p.hasOwnProperty('entregado')) p.entregado = false;
     if (!p.hasOwnProperty('noEntregado')) p.noEntregado = false;
     if (!p.hasOwnProperty('envioRecogido')) p.envioRecogido = false;
+    if (p.entregado) {
+      p.enCurso = false;
+      p.posicionPendiente = null;
+    }
     if (p.coords && (!Number.isFinite(Number(p.coords.lat)) || !Number.isFinite(Number(p.coords.lng)))) {
       p.coords = null;
     } else if (p.coords) {
