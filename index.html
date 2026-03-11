@@ -61,11 +61,20 @@
         <span class="total-icon icon-entregar-tienda"><i class="fa-solid fa-store"></i></span>
         A entregar a tienda: $<span id="totalEntregarTienda">0</span>
       </div>
+      <div class="total-item total-nequi">
+        <span class="total-icon icon-nequi"><i class="fa-solid fa-mobile-screen-button"></i></span>
+        Pagado por Nequi: $<span id="totalPagadoNequi">0</span>
+      </div>
+      <div class="total-item total-daviplata">
+        <span class="total-icon icon-daviplata"><i class="fa-solid fa-wallet"></i></span>
+        Pagado por Daviplata: $<span id="totalPagadoDaviplata">0</span>
+      </div>
     </div>
     <div class="pedidos-tabs" id="pedidosTabs">
       <button class="pedidos-tab active" onclick="cambiarVistaPedidos('pendientes')"><i class="fa-regular fa-clock"></i> Pendientes</button>
       <button class="pedidos-tab" onclick="cambiarVistaPedidos('enCurso')"><i class="fa-solid fa-truck-fast"></i> En curso</button>
       <button class="pedidos-tab" onclick="cambiarVistaPedidos('entregados')"><i class="fa-solid fa-circle-check"></i> Finalizados</button>
+      <button class="pedidos-tab" onclick="cambiarVistaPedidos('cancelados')"><i class="fa-solid fa-ban"></i> Cancelados</button>
     </div>
     <div id="listaPedidos">
       <div class="empty-state" id="emptyState">

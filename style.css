@@ -198,6 +198,11 @@ button i,
   color: var(--triad-c-dark);
 }
 
+.seccion-cancelados .pedidos-seccion-header {
+  background: #fff3e0;
+  color: #9a3412;
+}
+
 .pedido {
   background: #f7f9fb;
   padding: 20px;
@@ -228,6 +233,21 @@ button i,
 
 .pedido.en-curso {
   border-left-color: var(--triad-b);
+}
+
+.pedido.cancelado {
+  background: #fff7ed;
+  border-left-color: #ea580c;
+  opacity: 0.9;
+  cursor: default;
+}
+
+.pedido.cancelado .pedido-numero {
+  color: #9a3412;
+}
+
+.pedido.cancelado .pedido-tools {
+  display: none;
 }
 
 .pedido.entregado .pedido-numero {
@@ -316,6 +336,28 @@ button i,
   background: #f3eaf0;
   color: var(--triad-c-dark);
   border: 2px solid #d8c8d1;
+}
+
+.total-nequi {
+  background: #e8f8ef;
+  color: #0f5132;
+  border: 2px solid #b7e1c4;
+}
+
+.total-daviplata {
+  background: #f4ebff;
+  color: #5b21b6;
+  border: 2px solid #dcc6fb;
+}
+
+.icon-nequi {
+  color: #065f46;
+  background: #bff3d6;
+}
+
+.icon-daviplata {
+  color: #6d28d9;
+  background: #e9d5ff;
 }
 
 .pedido-header {

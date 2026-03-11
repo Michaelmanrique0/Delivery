@@ -230,7 +230,12 @@ async function procesarPedido() {
     entregado: false,
     noEntregado: false,
     envioRecogido: false,
-    notificadoEnCamino: false
+    notificadoEnCamino: false,
+    cancelado: false,
+    metodoPagoEntrega: '',
+    montoNequi: 0,
+    montoDaviplata: 0,
+    montoEfectivo: 0
   });
 
   guardarPedidos();
@@ -303,7 +308,12 @@ async function procesarMultiplesPedidos(texto) {
       entregado: false,
       noEntregado: false,
       envioRecogido: false,
-      notificadoEnCamino: false
+      notificadoEnCamino: false,
+      cancelado: false,
+      metodoPagoEntrega: '',
+      montoNequi: 0,
+      montoDaviplata: 0,
+      montoEfectivo: 0
     });
 
     agregados++;
@@ -335,13 +345,15 @@ function renderPedidos() {
   const pendientes = [];
   const enCurso = [];
   const entregados = [];
+  const cancelados = [];
   pedidos.forEach((pedido, index) => {
-    if (pedido.entregado) entregados.push({ pedido, index });
+    if (pedido.cancelado) cancelados.push({ pedido, index });
+    else if (pedido.entregado) entregados.push({ pedido, index });
     else if (pedido.enCurso) enCurso.push({ pedido, index });
     else pendientes.push({ pedido, index });
   });
 
-  if (!vistaPedidosSeleccionadaManual && vistaPedidosActual !== 'entregados') {
+  if (!vistaPedidosSeleccionadaManual && !['entregados', 'cancelados'].includes(vistaPedidosActual)) {
     vistaPedidosActual = enCurso.length > 0 ? 'enCurso' : 'pendientes';
   }
 
@@ -353,6 +365,8 @@ function renderPedidos() {
       btn.innerHTML = `<i class="fa-solid fa-truck-fast"></i> En curso (${enCurso.length})`;
     } else if (onClick.includes("'entregados'")) {
       btn.innerHTML = `<i class="fa-solid fa-circle-check"></i> Finalizados (${entregados.length})`;
+    } else if (onClick.includes("'cancelados'")) {
+      btn.innerHTML = `<i class="fa-solid fa-ban"></i> Cancelados (${cancelados.length})`;
     }
   });
 
@@ -377,6 +391,8 @@ function renderPedidos() {
     lista.appendChild(crearSeccionPedidos('seccion-en-curso', enCurso, 'No hay pedidos en curso'));
   } else if (vistaPedidosActual === 'entregados') {
     lista.appendChild(crearSeccionPedidos('seccion-entregados', entregados, 'No hay pedidos entregados'));
+  } else if (vistaPedidosActual === 'cancelados') {
+    lista.appendChild(crearSeccionPedidos('seccion-cancelados', cancelados, 'No hay pedidos cancelados'));
   } else {
     lista.appendChild(crearSeccionPedidos('seccion-pendientes', pendientes, 'No hay pedidos pendientes'));
   }
@@ -386,13 +402,27 @@ function renderPedidos() {
   const enviosNoEntregadosEnPunto = pedidos.filter(p => p.noEntregado && p.envioRecogido).length;
   const pagoDomiciliario = (enviosEntregados + enviosNoEntregadosEnPunto) * 12000;
   const entregarTienda = recogidoDelDia - pagoDomiciliario;
+  const totalPagadoNequi = pedidos
+    .filter(p => p.entregado && !p.noEntregado)
+    .reduce((sum, p) => sum + Number(p.montoNequi || 0), 0);
+  const totalPagadoDaviplata = pedidos
+    .filter(p => p.entregado && !p.noEntregado)
+    .reduce((sum, p) => sum + Number(p.montoDaviplata || 0), 0);
 
   const elResumen = document.getElementById('totalesResumen');
   if (elResumen) {
-    document.getElementById('totalRecogidoDia').textContent = recogidoDelDia.toLocaleString('es-CO');
-    document.getElementById('totalPagoDomiciliario').textContent = pagoDomiciliario.toLocaleString('es-CO');
-    document.getElementById('totalEntregarTienda').textContent = entregarTienda.toLocaleString('es-CO');
-    elResumen.style.display = (recogidoDelDia > 0 || pagoDomiciliario > 0) ? 'flex' : 'none';
+    const elRecogidoDia = document.getElementById('totalRecogidoDia');
+    const elPagoDomiciliario = document.getElementById('totalPagoDomiciliario');
+    const elEntregarTienda = document.getElementById('totalEntregarTienda');
+    const elPagadoNequi = document.getElementById('totalPagadoNequi');
+    const elPagadoDaviplata = document.getElementById('totalPagadoDaviplata');
+
+    if (elRecogidoDia) elRecogidoDia.textContent = recogidoDelDia.toLocaleString('es-CO');
+    if (elPagoDomiciliario) elPagoDomiciliario.textContent = pagoDomiciliario.toLocaleString('es-CO');
+    if (elEntregarTienda) elEntregarTienda.textContent = entregarTienda.toLocaleString('es-CO');
+    if (elPagadoNequi) elPagadoNequi.textContent = totalPagadoNequi.toLocaleString('es-CO');
+    if (elPagadoDaviplata) elPagadoDaviplata.textContent = totalPagadoDaviplata.toLocaleString('es-CO');
+    elResumen.style.display = (recogidoDelDia > 0 || pagoDomiciliario > 0 || totalPagadoNequi > 0 || totalPagadoDaviplata > 0) ? 'flex' : 'none';
   }
 
   renderListaOrdenEntrega();
@@ -400,7 +430,7 @@ function renderPedidos() {
 }
 
 function cambiarVistaPedidos(vista) {
-  if (!['pendientes', 'enCurso', 'entregados'].includes(vista)) return;
+  if (!['pendientes', 'enCurso', 'entregados', 'cancelados'].includes(vista)) return;
   vistaPedidosSeleccionadaManual = true;
   vistaPedidosActual = vista;
   renderPedidos();
@@ -425,8 +455,11 @@ function crearSeccionPedidos(claseExtra, items, textoVacio) {
 
 function crearTarjetaPedido(pedido, index) {
   const div = document.createElement("div");
-  div.className = "pedido" + (pedido.entregado ? " entregado" : "") + (pedido.enCurso && !pedido.entregado ? " en-curso" : "");
-  div.draggable = !pedido.entregado;
+  div.className = "pedido"
+    + (pedido.entregado ? " entregado" : "")
+    + (pedido.enCurso && !pedido.entregado ? " en-curso" : "")
+    + (pedido.cancelado ? " cancelado" : "");
+  div.draggable = !pedido.entregado && !pedido.cancelado;
   div.dataset.index = index;
   div.dataset.id = pedido.id;
 
@@ -435,14 +468,23 @@ function crearTarjetaPedido(pedido, index) {
   const btnNoEntregadoHtml = pedido.entregado
     ? `<div class="pedido-no-entregado-wrap"><button class="btn-warning" onclick="marcarNoEntregado(${index})" style="width: 100%;"><i class="fa-solid fa-rotate-left"></i> No entregado</button></div>`
     : '';
-  const btnRegresarPendienteHtml = (!pedido.entregado && pedido.enCurso)
+  const btnRegresarPendienteHtml = (!pedido.entregado && !pedido.cancelado && pedido.enCurso)
     ? `<button class="btn-info" onclick="marcarPendiente(${index})"><i class="fa-solid fa-rotate-left"></i> Regresar a pendiente</button>`
     : '';
+  const btnCancelarHtml = (!pedido.entregado && !pedido.cancelado)
+    ? `<button class="btn-warning" onclick="marcarCancelado(${index})"><i class="fa-solid fa-ban"></i> Cancelar pedido</button>`
+    : '';
+  const btnReactivarCanceladoHtml = pedido.cancelado
+    ? `<button class="btn-success" onclick="reactivarPedidoCancelado(${index})"><i class="fa-solid fa-rotate-left"></i> Reactivar pedido</button>`
+    : '';
   const textoBotonNotificar = pedido.notificadoEnCamino ? 'Volver a notificar' : 'Notificar en camino';
+  const btnNotificarHtml = (!pedido.entregado && !pedido.cancelado)
+    ? `<button class="btn-notify" onclick="notificarEnCamino(${index}, ${pedido.id})"><i class="fa-solid fa-bullhorn"></i> ${textoBotonNotificar}</button>`
+    : '';
 
   const estadoTexto = pedido.entregado
     ? (pedido.noEntregado ? ' - No entregado' : ' - Entregado')
-    : (pedido.enCurso ? ' - En curso' : '');
+    : (pedido.cancelado ? ' - Cancelado' : (pedido.enCurso ? ' - En curso' : ''));
 
   div.innerHTML = `
     <div class="pedido-header">
@@ -489,16 +531,16 @@ function crearTarjetaPedido(pedido, index) {
       <details class="pedido-dropdown">
         <summary class="btn-camera"><i class="fa-solid fa-camera"></i> Evidencia</summary>
         <div class="pedido-dropdown-content">
-          <button class="btn-camera" onclick="fotoEntregado(${index}, ${pedido.id})"><i class="fa-solid fa-camera"></i> Foto entregado</button>
+          <button class="btn-camera" onclick="fotoEntregado(${index}, ${pedido.id})"><i class="fa-solid fa-camera"></i> Foto evidencia entregado</button>
           <button class="btn-camera" onclick="mostrarOpcionesNoEntregado(${index}, ${pedido.id})"><i class="fa-solid fa-camera-rotate"></i> Foto no entregado</button>
         </div>
       </details>
     </div>
     <div class="pedido-actions">
-      <div class="pedido-actions-row">
-        <button class="btn-notify" onclick="notificarEnCamino(${index}, ${pedido.id})"><i class="fa-solid fa-bullhorn"></i> ${textoBotonNotificar}</button>
-      </div>
+      ${btnNotificarHtml ? `<div class="pedido-actions-row">${btnNotificarHtml}</div>` : ''}
       ${btnRegresarPendienteHtml ? `<div class="pedido-actions-row">${btnRegresarPendienteHtml}</div>` : ''}
+      ${btnCancelarHtml ? `<div class="pedido-actions-row">${btnCancelarHtml}</div>` : ''}
+      ${btnReactivarCanceladoHtml ? `<div class="pedido-actions-row">${btnReactivarCanceladoHtml}</div>` : ''}
     </div>
     ${btnNoEntregadoHtml}
   `;
@@ -514,7 +556,7 @@ function renderListaOrdenEntrega() {
   const listaOrden = document.getElementById('listaOrdenEntrega');
   if (!listaOrden) return;
 
-  const pedidosActivos = pedidos.filter(p => !p.entregado);
+  const pedidosActivos = pedidos.filter(p => !p.entregado && !p.cancelado);
   if (pedidosActivos.length === 0) {
     listaOrden.innerHTML = '<div class="orden-vacio">No hay pedidos activos</div>';
     return;
@@ -637,7 +679,7 @@ function marcarEntregado(index) {
 
 function marcarEnCurso(index) {
   const pedido = pedidos[index];
-  if (!pedido || pedido.entregado) return;
+  if (!pedido || pedido.entregado || pedido.cancelado) return;
   if (pedido.posicionPendiente == null) pedido.posicionPendiente = index;
   pedido.enCurso = true;
   guardarPedidos();
@@ -647,7 +689,7 @@ function marcarEnCurso(index) {
 
 function marcarPendiente(index) {
   const pedido = pedidos[index];
-  if (!pedido || pedido.entregado) return;
+  if (!pedido || pedido.entregado || pedido.cancelado) return;
 
   const posicionOriginal = Number.isInteger(pedido.posicionPendiente)
     ? pedido.posicionPendiente
@@ -674,6 +716,30 @@ function marcarNoEntregado(index) {
   pedido.posicionPendiente = null;
   pedido.noEntregado = false;
   pedido.envioRecogido = false;
+  pedido.cancelado = false;
+  guardarPedidos();
+  renderPedidos();
+  actualizarMarcadores();
+}
+
+function marcarCancelado(index) {
+  const pedido = pedidos[index];
+  if (!pedido || pedido.entregado || pedido.cancelado) return;
+  pedido.cancelado = true;
+  pedido.enCurso = false;
+  pedido.posicionPendiente = null;
+  guardarPedidos();
+  renderPedidos();
+  actualizarMarcadores();
+}
+
+function reactivarPedidoCancelado(index) {
+  const pedido = pedidos[index];
+  if (!pedido || !pedido.cancelado) return;
+  pedido.cancelado = false;
+  pedido.entregado = false;
+  pedido.enCurso = false;
+  pedido.posicionPendiente = null;
   guardarPedidos();
   renderPedidos();
   actualizarMarcadores();
@@ -963,15 +1029,161 @@ function cerrarModalDecision() {
 
 // --- Fotos / WhatsApp Admin ---
 
+let pagoEntregadoPendiente = { index: null, pedidoId: null };
+
+function parseMontoEntero(valor) {
+  const limpio = String(valor || '').replace(/[^\d]/g, '');
+  return limpio ? parseInt(limpio, 10) : 0;
+}
+
+function asegurarModalPagoEntregado() {
+  let modal = document.getElementById('modalPagoEntregado');
+  if (modal) return modal;
+
+  modal = document.createElement('div');
+  modal.id = 'modalPagoEntregado';
+  modal.className = 'modal-no-entregado-backdrop';
+  modal.innerHTML = `
+    <div class="modal-no-entregado-card">
+      <h3>Foto evidencia entregado</h3>
+      <p>Selecciona el método de pago del pedido:</p>
+      <div class="modal-no-entregado-actions">
+        <button class="btn-success" onclick="seleccionarMetodoPagoEntregado('nequi')">Nequi</button>
+        <button class="btn-info" onclick="seleccionarMetodoPagoEntregado('efectivo')">Efectivo</button>
+        <button class="btn-route" onclick="seleccionarMetodoPagoEntregado('daviplata')">Daviplata</button>
+        <button class="btn-success" onclick="seleccionarMetodoPagoEntregado('nequi_efectivo')">Nequi + Efectivo</button>
+        <button class="btn-route" onclick="seleccionarMetodoPagoEntregado('daviplata_efectivo')">Daviplata + Efectivo</button>
+      </div>
+      <div id="montosMixtosPago" style="display:none; margin-top: 12px;">
+        <input id="montoDigitalPago" type="text" inputmode="numeric" placeholder="Monto digital" style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:8px; margin-bottom:8px;">
+        <input id="montoEfectivoPago" type="text" inputmode="numeric" placeholder="Monto en efectivo" style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:8px;">
+        <button class="btn-primary" style="width:100%; margin-top:8px;" onclick="confirmarMontosMixtosPago()">Confirmar montos</button>
+      </div>
+      <button class="modal-no-entregado-close" onclick="cerrarModalPagoEntregado()">Cerrar</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function cerrarModalPagoEntregado() {
+  const modal = document.getElementById('modalPagoEntregado');
+  if (!modal) return;
+  modal.style.display = 'none';
+  const contenedorMontos = document.getElementById('montosMixtosPago');
+  const inputDigital = document.getElementById('montoDigitalPago');
+  const inputEfectivo = document.getElementById('montoEfectivoPago');
+  if (contenedorMontos) contenedorMontos.style.display = 'none';
+  if (inputDigital) inputDigital.value = '';
+  if (inputEfectivo) inputEfectivo.value = '';
+}
+
 function fotoEntregado(index, pedidoId) {
-  const numeroAdmin = '573143473582';
-  const mensaje = `Pedido #${pedidoId} entregado`;
-  window.open(`https://wa.me/${numeroAdmin}?text=${encodeURIComponent(mensaje)}`, '_blank');
-  const pedido = pedidos[index];
+  pagoEntregadoPendiente = { index, pedidoId };
+  const modal = asegurarModalPagoEntregado();
+  modal.style.display = 'flex';
+}
+
+function registrarEntregaConPago(index, pedidoId, datosPago) {
+  const indexActual = pedidos.findIndex(p => p.id === pedidoId);
+  const indexFinal = indexActual >= 0 ? indexActual : index;
+  const pedido = pedidos[indexFinal];
   if (!pedido) return;
+
   pedido.noEntregado = false;
   pedido.envioRecogido = false;
-  marcarEntregado(index);
+  pedido.metodoPagoEntrega = datosPago.metodo;
+  pedido.montoNequi = Number(datosPago.montoNequi || 0);
+  pedido.montoDaviplata = Number(datosPago.montoDaviplata || 0);
+  pedido.montoEfectivo = Number(datosPago.montoEfectivo || 0);
+
+  const numeroAdmin = '573143473582';
+  const montoRecibido = Number(pedido.montoNequi || 0) + Number(pedido.montoDaviplata || 0) + Number(pedido.montoEfectivo || 0);
+  const productosEntregados = pedido.productos && pedido.productos.length > 0
+    ? pedido.productos.join(', ')
+    : 'No especificado';
+
+  let metodoPagoTexto = 'No especificado';
+  if (pedido.metodoPagoEntrega === 'nequi') metodoPagoTexto = 'Nequi';
+  else if (pedido.metodoPagoEntrega === 'efectivo') metodoPagoTexto = 'Efectivo';
+  else if (pedido.metodoPagoEntrega === 'daviplata') metodoPagoTexto = 'Daviplata';
+  else if (pedido.metodoPagoEntrega === 'nequi_efectivo') metodoPagoTexto = `Nequi + Efectivo (Nequi: $${pedido.montoNequi.toLocaleString('es-CO')}, Efectivo: $${pedido.montoEfectivo.toLocaleString('es-CO')})`;
+  else if (pedido.metodoPagoEntrega === 'daviplata_efectivo') metodoPagoTexto = `Daviplata + Efectivo (Daviplata: $${pedido.montoDaviplata.toLocaleString('es-CO')}, Efectivo: $${pedido.montoEfectivo.toLocaleString('es-CO')})`;
+
+  const mensaje = `Pedido #${pedidoId} entregado
+Monto recibido: $${montoRecibido.toLocaleString('es-CO')}
+Producto(s) entregado(s): ${productosEntregados}
+Método de pago: ${metodoPagoTexto}`;
+  window.open(`https://wa.me/${numeroAdmin}?text=${encodeURIComponent(mensaje)}`, '_blank');
+  marcarEntregado(indexFinal);
+}
+
+function seleccionarMetodoPagoEntregado(metodo) {
+  const { index, pedidoId } = pagoEntregadoPendiente;
+  const indexActual = pedidos.findIndex(p => p.id === pedidoId);
+  const indexFinal = indexActual >= 0 ? indexActual : index;
+  const pedido = pedidos[indexFinal];
+  if (!pedido) return;
+
+  const totalPedido = parseMontoEntero(pedido.valor);
+  const contenedorMontos = document.getElementById('montosMixtosPago');
+  const inputDigital = document.getElementById('montoDigitalPago');
+  const inputEfectivo = document.getElementById('montoEfectivoPago');
+
+  if (metodo === 'nequi_efectivo' || metodo === 'daviplata_efectivo') {
+    if (!contenedorMontos || !inputDigital || !inputEfectivo) return;
+    contenedorMontos.style.display = 'block';
+    inputDigital.placeholder = metodo === 'nequi_efectivo' ? 'Monto pagado por Nequi' : 'Monto pagado por Daviplata';
+    inputEfectivo.placeholder = 'Monto pagado en efectivo';
+    inputDigital.value = '';
+    inputEfectivo.value = '';
+    inputDigital.dataset.metodoMixto = metodo;
+    inputDigital.dataset.totalPedido = String(totalPedido);
+    return;
+  }
+
+  const datosPago = {
+    metodo,
+    montoNequi: metodo === 'nequi' ? totalPedido : 0,
+    montoDaviplata: metodo === 'daviplata' ? totalPedido : 0,
+    montoEfectivo: metodo === 'efectivo' ? totalPedido : 0
+  };
+  cerrarModalPagoEntregado();
+  registrarEntregaConPago(indexFinal, pedidoId, datosPago);
+}
+
+function confirmarMontosMixtosPago() {
+  const { index, pedidoId } = pagoEntregadoPendiente;
+  const inputDigital = document.getElementById('montoDigitalPago');
+  const inputEfectivo = document.getElementById('montoEfectivoPago');
+  if (!inputDigital || !inputEfectivo) return;
+
+  const metodo = inputDigital.dataset.metodoMixto || '';
+  const totalPedido = parseInt(inputDigital.dataset.totalPedido || '0', 10);
+  const montoDigital = parseMontoEntero(inputDigital.value);
+  const montoEfectivo = parseMontoEntero(inputEfectivo.value);
+
+  if (!(metodo === 'nequi_efectivo' || metodo === 'daviplata_efectivo')) {
+    alert('Selecciona un método de pago mixto válido.');
+    return;
+  }
+  if (montoDigital <= 0 || montoEfectivo <= 0) {
+    alert('Debes ingresar ambos montos para registrar el pago mixto.');
+    return;
+  }
+  if (montoDigital + montoEfectivo !== totalPedido) {
+    alert(`La suma de montos debe ser igual al valor del pedido ($${totalPedido.toLocaleString('es-CO')}).`);
+    return;
+  }
+
+  const datosPago = {
+    metodo,
+    montoNequi: metodo === 'nequi_efectivo' ? montoDigital : 0,
+    montoDaviplata: metodo === 'daviplata_efectivo' ? montoDigital : 0,
+    montoEfectivo
+  };
+  cerrarModalPagoEntregado();
+  registrarEntregaConPago(index, pedidoId, datosPago);
 }
 
 let noEntregadoPendiente = { index: null, pedidoId: null };
@@ -1212,7 +1424,7 @@ function actualizarMarcadores() {
   if (pedidos.length === 0) return;
 
   let completados = 0;
-  const conUbicacion = pedidos.filter(p => p.coords || p.mapUrl || p.direccion);
+  const conUbicacion = pedidos.filter(p => !p.cancelado && (p.coords || p.mapUrl || p.direccion));
   const total = conUbicacion.length;
   if (total === 0) return;
 
@@ -1432,12 +1644,16 @@ function compactarPedidos() {
     p.direccion || '',
     p.valor || '0',
     p.mapUrl || '',
-    (p.entregado ? 1 : 0) | (p.noEntregado ? 2 : 0) | (p.envioRecogido ? 4 : 0) | (p.enCurso ? 8 : 0) | (p.notificadoEnCamino ? 16 : 0),
+    (p.entregado ? 1 : 0) | (p.noEntregado ? 2 : 0) | (p.envioRecogido ? 4 : 0) | (p.enCurso ? 8 : 0) | (p.notificadoEnCamino ? 16 : 0) | (p.cancelado ? 32 : 0),
     (p.productos || []).join('|'),
     (p.coords && Number.isFinite(p.coords.lat) && Number.isFinite(p.coords.lng))
       ? `${p.coords.lat},${p.coords.lng}`
       : '',
-    Number.isInteger(p.posicionPendiente) ? p.posicionPendiente : ''
+    Number.isInteger(p.posicionPendiente) ? p.posicionPendiente : '',
+    p.metodoPagoEntrega || '',
+    Number(p.montoNequi || 0),
+    Number(p.montoDaviplata || 0),
+    Number(p.montoEfectivo || 0)
   ]);
 }
 
@@ -1456,9 +1672,13 @@ function descompactarPedidos(arr) {
     return ({
     id: c[0], nombre: c[1], telefono: c[2], direccion: c[3],
     valor: c[4], mapUrl: c[5],
-    entregado: !!(c[6] & 1), noEntregado: !!(c[6] & 2), envioRecogido: !!(c[6] & 4), enCurso: !!(c[6] & 8), notificadoEnCamino: !!(c[6] & 16),
+    entregado: !!(c[6] & 1), noEntregado: !!(c[6] & 2), envioRecogido: !!(c[6] & 4), enCurso: !!(c[6] & 8), notificadoEnCamino: !!(c[6] & 16), cancelado: !!(c[6] & 32),
     productos: c[7] ? c[7].split('|') : [], textoOriginal: '', coords,
-    posicionPendiente: Number.isInteger(Number(c[9])) ? Number(c[9]) : null
+    posicionPendiente: Number.isInteger(Number(c[9])) ? Number(c[9]) : null,
+    metodoPagoEntrega: c[10] || '',
+    montoNequi: Number(c[11] || 0),
+    montoDaviplata: Number(c[12] || 0),
+    montoEfectivo: Number(c[13] || 0)
   });
   });
 }
@@ -1553,6 +1773,11 @@ async function aplicarImportacion() {
       if (!p.hasOwnProperty('noEntregado')) p.noEntregado = false;
       if (!p.hasOwnProperty('envioRecogido')) p.envioRecogido = false;
       if (!p.hasOwnProperty('notificadoEnCamino')) p.notificadoEnCamino = false;
+      if (!p.hasOwnProperty('cancelado')) p.cancelado = false;
+      if (!p.hasOwnProperty('metodoPagoEntrega')) p.metodoPagoEntrega = '';
+      if (!p.hasOwnProperty('montoNequi')) p.montoNequi = 0;
+      if (!p.hasOwnProperty('montoDaviplata')) p.montoDaviplata = 0;
+      if (!p.hasOwnProperty('montoEfectivo')) p.montoEfectivo = 0;
       if (p.entregado) p.posicionPendiente = null;
       return p;
     });
@@ -1635,6 +1860,11 @@ window.onload = function () {
     if (!p.hasOwnProperty('noEntregado')) p.noEntregado = false;
     if (!p.hasOwnProperty('envioRecogido')) p.envioRecogido = false;
     if (!p.hasOwnProperty('notificadoEnCamino')) p.notificadoEnCamino = false;
+    if (!p.hasOwnProperty('cancelado')) p.cancelado = false;
+    if (!p.hasOwnProperty('metodoPagoEntrega')) p.metodoPagoEntrega = '';
+    if (!p.hasOwnProperty('montoNequi')) p.montoNequi = 0;
+    if (!p.hasOwnProperty('montoDaviplata')) p.montoDaviplata = 0;
+    if (!p.hasOwnProperty('montoEfectivo')) p.montoEfectivo = 0;
     if (p.entregado) {
       p.enCurso = false;
       p.posicionPendiente = null;
