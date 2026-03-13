@@ -2331,6 +2331,19 @@ window.onload = function () {
   });
   guardarPedidos();
   cargarConfigNotificacionEnUI();
+  const btnConfig = document.getElementById('btnConfigNotificacion');
+  if (btnConfig) {
+    btnConfig.addEventListener('click', (e) => {
+      e.preventDefault();
+      abrirConfigNotificacion();
+    });
+  }
+  const modalConfig = document.getElementById('modalConfigNotificacion');
+  if (modalConfig) {
+    modalConfig.addEventListener('click', (e) => {
+      if (e.target === modalConfig) cerrarConfigNotificacion();
+    });
+  }
 
   if (pedidos.length > 0) {
     nextPedidoId = Math.max(...pedidos.map(p => p.id)) + 1;
