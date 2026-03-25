@@ -3712,13 +3712,3 @@ async function iniciarAppSupabase() {
     mostrarPantallaAuth();
   }
 }
-
-window.onload = function () {
-  void iniciarAppSupabase();
-};
-
-// Flush de pedidos al salir/recargar pestaña.
-window.addEventListener('pagehide', () => {
-  enSalidaDePagina = true;
-  try { void persistPedidosToSupabase({ silent: true, keepalive: true }); } catch (_e) {}
-});
