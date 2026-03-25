@@ -103,7 +103,29 @@ let vistaPedidosSeleccionadaManual = false;
 const TELEFONO_SOPORTE = '3213153165';
 const CONFIG_NOTIFICACION_KEY = 'configNotificacionPago';
 const CACHE_USUARIOS_ADMIN_KEY = 'cacheUsuariosAdmin_v1';
-const CACHE_PEDIDOS_KEY = 'cachePedidos_v1';
+/** @deprecated Caché global; la app usa caché por usuario (ver keyCachePedidosUser). Se limpia al boot por compatibilidad. */
+const CACHE_PEDIDOS_LEGACY_KEY = 'cachePedidos_v1';
+
+function keyCachePedidosUser(userId) {
+  if (!userId) return null;
+  return `cachePedidos_v1_${String(userId)}`;
+}
+
+/** UUID en minúsculas para coincidir con auth.uid() y columnas uuid en Postgres. */
+function normalizarUuidAsignacion(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  return s.toLowerCase();
+}
+
+function limpiarCachePedidosUsuario(userId) {
+  try {
+    localStorage.removeItem(CACHE_PEDIDOS_LEGACY_KEY);
+    const k = keyCachePedidosUser(userId);
+    if (k) localStorage.removeItem(k);
+  } catch (_e) {}
+}
 const CONFIG_NOTIFICACION_DEFAULT = {
   tieneNequi: true,
   tieneDaviplata: true,
@@ -170,7 +192,9 @@ function guardarConfigNotificacionPago() {
 
 function cargarCachePedidos() {
   try {
-    const raw = localStorage.getItem(CACHE_PEDIDOS_KEY);
+    const k = keyCachePedidosUser(sesionActiva?.user?.id);
+    if (!k) return [];
+    const raw = localStorage.getItem(k);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -182,9 +206,11 @@ function cargarCachePedidos() {
 
 function guardarCachePedidos() {
   try {
+    const k = keyCachePedidosUser(sesionActiva?.user?.id);
+    if (!k) return;
     const lista = Array.isArray(pedidos) ? pedidos : [];
     const dedup = deduplicarPedidosPorId(lista);
-    localStorage.setItem(CACHE_PEDIDOS_KEY, JSON.stringify(dedup));
+    localStorage.setItem(k, JSON.stringify(dedup));
   } catch (_e) {}
 }
 
@@ -442,7 +468,9 @@ function rowToPedido(r) {
   }
   return {
     id: Number(r.id),
-    assignedTo: r.assigned_to || null,
+    assignedTo: r.assigned_to != null && String(r.assigned_to).trim() !== ''
+      ? normalizarUuidAsignacion(r.assigned_to)
+      : null,
     createdBy: r.created_by || null,
     nombre: r.nombre || '',
     telefono: r.telefono || '',
@@ -469,7 +497,7 @@ function rowToPedido(r) {
 function pedidoToRow(p, sortIndex) {
   return {
     id: p.id,
-    assigned_to: p.assignedTo || null,
+    assigned_to: normalizarUuidAsignacion(p.assignedTo),
     created_by: p.createdBy || sesionActiva?.user?.id || null,
     nombre: p.nombre || '',
     telefono: p.telefono || '',
@@ -1052,13 +1080,18 @@ async function aplicarCambioRolDesdeFila(userId) {
 
 async function asignarPedidoRepartidor(pedidoId, repartidorIdRaw) {
   if (!esAdmin() || !supabaseCliente) return;
-  const repartidorId = repartidorIdRaw && String(repartidorIdRaw).trim() ? String(repartidorIdRaw).trim() : null;
-  const { error } = await supabaseCliente
+  const repartidorId = normalizarUuidAsignacion(repartidorIdRaw);
+  const { data, error } = await supabaseCliente
     .from('pedidos')
     .update({ assigned_to: repartidorId, updated_at: new Date().toISOString() })
-    .eq('id', pedidoId);
+    .eq('id', pedidoId)
+    .select('id');
   if (error) {
     alert('No se pudo asignar: ' + error.message);
+    return;
+  }
+  if (!data || data.length === 0) {
+    alert('No se actualizó el pedido (revisa que seas admin en Supabase y que exista el pedido).');
     return;
   }
   const p = pedidos.find(x => x.id === pedidoId);
@@ -1076,7 +1109,7 @@ async function asignarSeccionPedidos(claseExtra) {
   if (!esAdmin() || !supabaseCliente) return;
   const sel = document.getElementById(`asignar-seccion-${claseExtra}`);
   if (!sel) return;
-  const repartidorId = sel.value && String(sel.value).trim() ? String(sel.value).trim() : null;
+  const repartidorId = normalizarUuidAsignacion(sel.value);
   const ids = pedidos
     .filter((p) => {
       if (p.cancelado || p.entregado) return false;
@@ -1086,13 +1119,26 @@ async function asignarSeccionPedidos(claseExtra) {
     })
     .map((p) => p.id);
   if (ids.length === 0) return;
-  const { error } = await supabaseCliente
-    .from('pedidos')
-    .update({ assigned_to: repartidorId, updated_at: new Date().toISOString() })
-    .in('id', ids);
-  if (error) {
-    alert('No se pudo asignar la sección: ' + error.message);
-    return;
+  const CHUNK = 80;
+  let totalActualizados = 0;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const { data, error } = await supabaseCliente
+      .from('pedidos')
+      .update({ assigned_to: repartidorId, updated_at: new Date().toISOString() })
+      .in('id', chunk)
+      .select('id');
+    if (error) {
+      alert('No se pudo asignar la sección: ' + error.message);
+      return;
+    }
+    totalActualizados += (data && data.length) ? data.length : 0;
+  }
+  if (totalActualizados !== ids.length) {
+    alert(
+      `Solo se actualizaron ${totalActualizados} de ${ids.length} pedidos. ` +
+        'El repartidor no verá los que falten hasta que corrijas permisos (RLS) o el rol admin en Supabase. Recarga la página como admin.'
+    );
   }
   pedidos.forEach((p) => {
     if (ids.includes(p.id)) p.assignedTo = repartidorId;
@@ -1134,10 +1180,11 @@ function opcionesSelectRepartidores(pedido) {
   const opts = ['<option value="">Sin asignar</option>'];
   const normalizarRol = (r) => String(r || '').toLowerCase().trim();
   usuariosRegistrados.filter(u => normalizarRol(u.role) === 'repartidor').forEach((u) => {
-    const sel = pedido.assignedTo === u.id ? ' selected' : '';
+    const uid = normalizarUuidAsignacion(u.id);
+    const sel = uid && pedido.assignedTo && pedido.assignedTo === uid ? ' selected' : '';
     const login = usuarioLoginVisible(u.email);
     const label = `${(u.full_name || '').trim() || login || u.id}${login ? ' · ' + login : ''}`;
-    opts.push(`<option value="${u.id}"${sel}>${escapeHtmlAttr(label)}</option>`);
+    opts.push(`<option value="${uid || ''}"${sel}>${escapeHtmlAttr(label)}</option>`);
   });
   return opts.join('');
 }
@@ -1396,6 +1443,8 @@ async function registrarUsuario() {
 async function cerrarSesion() {
   cerrarMenuUsuario();
   const client = supabaseCliente;
+  const uid = sesionActiva?.user?.id;
+  limpiarCachePedidosUsuario(uid);
   pedidos = [];
   perfilUsuario = null;
   sesionActiva = null;
@@ -2309,7 +2358,7 @@ async function eliminarTodos() {
   // Si no hay cliente o no hay nada que borrar, igual limpiamos cache/estado local.
   if (!supabaseCliente || ids.length === 0) {
     pedidos = [];
-    try { localStorage.removeItem(CACHE_PEDIDOS_KEY); } catch (_e) {}
+    limpiarCachePedidosUsuario(sesionActiva?.user?.id);
     guardarCachePedidos();
     renderPedidos();
     actualizarMarcadores();
@@ -2329,7 +2378,7 @@ async function eliminarTodos() {
 
   // Borrado exitoso: limpiar estado y cache local para que no reaparezcan al recargar.
   pedidos = [];
-  try { localStorage.removeItem(CACHE_PEDIDOS_KEY); } catch (_e) {}
+  limpiarCachePedidosUsuario(sesionActiva?.user?.id);
   guardarCachePedidos();
   renderPedidos();
   actualizarMarcadores();
@@ -3461,7 +3510,11 @@ function procesarURLMapaPedido(url, pedidoId, productos, callback) {
 // --- Inicialización ---
 
 function normalizarPedidoEnMemoria(p) {
-  if (!p.hasOwnProperty('assignedTo')) p.assignedTo = null;
+  if (!p.hasOwnProperty('assignedTo') || p.assignedTo == null || String(p.assignedTo).trim() === '') {
+    p.assignedTo = null;
+  } else {
+    p.assignedTo = normalizarUuidAsignacion(p.assignedTo);
+  }
   if (!p.hasOwnProperty('createdBy')) p.createdBy = null;
   if (!p.hasOwnProperty('mapUrl')) p.mapUrl = '';
   if (!p.hasOwnProperty('coords') || !p.coords) p.coords = null;
@@ -3501,6 +3554,14 @@ async function bootSesionYDatos() {
       mostrarAppPrincipal();
     }
     try {
+      if (sesionActiva?.user?.id) {
+        try { localStorage.removeItem(CACHE_PEDIDOS_LEGACY_KEY); } catch (_e) {}
+        const cachePrevio = cargarCachePedidos();
+        if (Array.isArray(cachePrevio) && cachePrevio.length > 0) {
+          pedidos = deduplicarPedidosPorId(cachePrevio.map(normalizarPedidoEnMemoria));
+          nextPedidoId = Math.max(...pedidos.map((p) => p.id), 0) + 1;
+        }
+      }
       await Promise.all([refrescarPerfilUsuario(), cargarPedidosDesdeSupabase()]);
       if (sesionActiva) mostrarAppPrincipal();
 
@@ -3546,15 +3607,6 @@ async function iniciarAppSupabase() {
     mostrarPantallaAuth();
     return;
   }
-
-  // Pintar pedidos desde cache local de inmediato (antes de la red).
-  try {
-    const cache = cargarCachePedidos();
-    if (Array.isArray(cache) && cache.length > 0) {
-      pedidos = cache.map(normalizarPedidoEnMemoria);
-      nextPedidoId = Math.max(...pedidos.map((p) => p.id), 0) + 1;
-    }
-  } catch (_e) {}
 
   cargarConfigNotificacionEnUI();
   const modalConfig = document.getElementById('modalConfigNotificacion');
@@ -3602,8 +3654,10 @@ async function iniciarAppSupabase() {
       sesionActiva = session;
       return;
     }
+    const uidAnterior = sesionActiva?.user?.id;
     sesionActiva = session;
     if (!session) {
+      limpiarCachePedidosUsuario(uidAnterior);
       perfilUsuario = null;
       pedidos = [];
       mostrarPantallaAuth();
