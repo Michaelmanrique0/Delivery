@@ -2909,44 +2909,49 @@ function aplicarPedidosImportados(lista) {
   return deduplicarPedidosPorId(mapped);
 }
 
+async function importarPedidosDesdeTextoPlano(texto, origen = 'texto pegado') {
+  const data = await parsearTextoImportPedidosUniversal(String(texto || ''));
+  const lista = extraerListaPedidosDeImportParsed(data);
+  if (lista.length === 0) {
+    alert(`El ${origen} no contiene una lista de pedidos válida.`);
+    return false;
+  }
+  const reemplazar = confirm(
+    '¿Reemplazar todos los pedidos actuales por los importados?\n\n' +
+      'Aceptar = reemplazar todo\n' +
+      'Cancelar = combinar (mismo id: gana el importado)'
+  );
+  const incoming = aplicarPedidosImportados(lista);
+  if (reemplazar) {
+    pedidos = incoming;
+  } else {
+    const byId = new Map(pedidos.map((p) => [Number(p.id), p]));
+    incoming.forEach((p) => byId.set(Number(p.id), p));
+    pedidos = deduplicarPedidosPorId(Array.from(byId.values()));
+  }
+  if (pedidos.length > 0) {
+    nextPedidoId = Math.max(...pedidos.map((p) => p.id), 0) + 1;
+  } else {
+    nextPedidoId = 1;
+  }
+  guardarPedidos();
+  renderPedidos();
+  actualizarMarcadores();
+  alert(`Importación lista: ${incoming.length} pedido(s).`);
+  return true;
+}
+
 function importarPedidosDesdeArchivo(evt) {
   const file = evt.target && evt.target.files && evt.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async () => {
     try {
-      const data = await parsearTextoImportPedidosUniversal(String(reader.result || ''));
-      const lista = extraerListaPedidosDeImportParsed(data);
-      if (lista.length === 0) {
-        alert('El archivo no contiene una lista de pedidos válida.');
-        return;
-      }
-      const reemplazar = confirm(
-        '¿Reemplazar todos los pedidos actuales por los del archivo?\n\n' +
-          'Aceptar = reemplazar todo\n' +
-          'Cancelar = combinar (mismo id: gana el importado)'
-      );
-      const incoming = aplicarPedidosImportados(lista);
-      if (reemplazar) {
-        pedidos = incoming;
-      } else {
-        const byId = new Map(pedidos.map((p) => [Number(p.id), p]));
-        incoming.forEach((p) => byId.set(Number(p.id), p));
-        pedidos = deduplicarPedidosPorId(Array.from(byId.values()));
-      }
-      if (pedidos.length > 0) {
-        nextPedidoId = Math.max(...pedidos.map((p) => p.id), 0) + 1;
-      } else {
-        nextPedidoId = 1;
-      }
-      guardarPedidos();
-      renderPedidos();
-      actualizarMarcadores();
-      alert(`Importación lista: ${incoming.length} pedido(s).`);
+      await importarPedidosDesdeTextoPlano(String(reader.result || ''), 'archivo');
     } catch (e) {
       console.error(e);
       alert(
-        'No se pudo leer el archivo. Usa «Exportar JSON» o el código copiado del modal QR (empieza por D1…).'
+        'No se pudo leer el archivo. Usa el código D1… de respaldo o un archivo válido exportado por esta app.'
       );
     } finally {
       evt.target.value = '';
@@ -2955,8 +2960,59 @@ function importarPedidosDesdeArchivo(evt) {
   reader.readAsText(file, 'utf-8');
 }
 
-function dispararSelectorImportarPedidos() {
+function abrirModalImportarRespaldo() {
   cerrarMenuUsuario();
+  let modal = document.getElementById('modalImportarRespaldo');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modalImportarRespaldo';
+    modal.className = 'modal-no-entregado-backdrop';
+    modal.innerHTML =
+      '<div class="modal-no-entregado-card modal-qr-pedidos-card">' +
+      '<h3>Importar respaldo</h3>' +
+      '<p class="modal-qr-ayuda">Pega aquí el código de respaldo completo (D1…).</p>' +
+      '<label for="textoImportarRespaldo" class="qr-pedidos-label">Texto de respaldo</label>' +
+      '<textarea id="textoImportarRespaldo" class="qr-pedidos-textarea" rows="6" spellcheck="false" placeholder="Pega aquí el texto D1..."></textarea>' +
+      '<div class="qr-pedidos-acciones">' +
+      '<button type="button" class="btn-primary" onclick="confirmarImportarRespaldoPegado()">Importar texto pegado</button>' +
+      '<button type="button" class="btn-info" onclick="dispararSelectorImportarPedidos()">Importar desde archivo</button>' +
+      '<button type="button" class="modal-no-entregado-close" onclick="cerrarModalImportarRespaldo()">Cerrar</button>' +
+      '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) cerrarModalImportarRespaldo();
+    });
+  }
+  const ta = modal.querySelector('#textoImportarRespaldo');
+  if (ta) ta.value = '';
+  modal.style.display = 'flex';
+}
+
+async function confirmarImportarRespaldoPegado() {
+  const ta = document.getElementById('textoImportarRespaldo');
+  if (!ta) return;
+  const texto = String(ta.value || '').trim();
+  if (!texto) {
+    alert('Pega el texto de respaldo antes de importar.');
+    ta.focus();
+    return;
+  }
+  try {
+    const ok = await importarPedidosDesdeTextoPlano(texto, 'texto pegado');
+    if (ok) cerrarModalImportarRespaldo();
+  } catch (e) {
+    console.error(e);
+    alert('No se pudo importar el texto pegado. Verifica que esté completo y comience con D1…');
+  }
+}
+
+function cerrarModalImportarRespaldo() {
+  const modal = document.getElementById('modalImportarRespaldo');
+  if (modal) modal.style.display = 'none';
+}
+
+function dispararSelectorImportarPedidos() {
   const input = document.getElementById('inputImportarPedidos');
   if (input) input.click();
 }
