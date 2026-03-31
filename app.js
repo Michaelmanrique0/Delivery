@@ -5,6 +5,9 @@ let rutaLayer = null;
 let mapaAjustado = false;
 /** Evita repetir el mismo aviso de ubicaciones cercanas en cada refresco del mapa. */
 let firmaUltimoAvisoUbicacionesCercanas = '';
+/** Debounce y cancelación para cálculo de ruta. */
+let rutaRedrawTimer = null;
+let rutaAbortController = null;
 let nextPedidoId = 1;
 let vistaPedidosActual = 'pendientes';
 let vistaPedidosSeleccionadaManual = false;
@@ -388,6 +391,27 @@ function elegirUrlMapsParaBloque(textoCompletoLimpio, bloque, indiceBloque, urls
   if (enBloque) return enBloque[0].trim();
   if (urlsGlobal.length === 0) return '';
   if (urlsGlobal.length === 1) return urlsGlobal[0];
+
+  // Si el bloque está numerado ("3:"), intenta escoger la URL que esté dentro de ese bloque
+  // en el texto completo. Esto evita confusiones cuando hay URLs extra o el chat repite "N:".
+  const numMatch = String(bloque || '').match(/(^|\n)\s*(\d+):\s*(\n|$)/m);
+  if (numMatch && numMatch[2]) {
+    const n = numMatch[2];
+    const reInicio = new RegExp(`(^|\\n)\\s*${n}:\\s*(\\n|$)`, 'g');
+    // Tomar el último inicio "n:" antes del bloque (si el chat repite "n:" varias veces).
+    let inicioIdx = -1;
+    let mm;
+    while ((mm = reInicio.exec(textoCompletoLimpio))) inicioIdx = mm.index;
+    if (inicioIdx >= 0) {
+      const resto = textoCompletoLimpio.slice(inicioIdx);
+      const mNext = resto.match(/\n\s*\d+:\s*(\n|$)/);
+      const segmento = mNext ? resto.slice(0, mNext.index) : resto;
+      const urlEnSegmento = segmento.match(patronUrlMapsRegexUna());
+      if (urlEnSegmento) return urlEnSegmento[0].trim();
+    }
+  }
+
+  // Respaldo: por índice del bloque dentro de las URLs globales.
   if (indiceBloque < urlsGlobal.length) return urlsGlobal[indiceBloque];
   const prefijo = bloque.split(/Para\s+agilizar/i)[0] || bloque;
   const muestra = prefijo.trim().slice(0, 200);
@@ -767,6 +791,34 @@ async function procesarMultiplesPedidos(texto) {
   })();
   const urlsGlobal = extraerTodasLasUrlsMapsEnTexto(textoLimpio);
 
+  // Mapa de URLs por número de pedido, según el orden en el chat.
+  // En el formato de WhatsApp suele aparecer:
+  //   N:
+  //   <url maps>
+  //   N:
+  //   Para agilizar...
+  // Si solo usamos urlsGlobal por índice, se puede desalinear y repetir ubicaciones.
+  const urlsPorNumero = (() => {
+    const map = new Map();
+    let numActual = null;
+    const lineas = String(textoLimpio || '').split('\n');
+    for (const raw of lineas) {
+      const line = raw.trim();
+      const mNum = line.match(/^(\d+):\s*$/);
+      if (mNum) {
+        numActual = Number(mNum[1]);
+        continue;
+      }
+      const mUrl = line.match(patronUrlMapsRegexUna());
+      if (mUrl && numActual != null) {
+        const u = mUrl[0].trim();
+        if (!map.has(numActual)) map.set(numActual, []);
+        map.get(numActual).push(u);
+      }
+    }
+    return map;
+  })();
+
   let agregados = 0;
   let errores = [];
 
@@ -778,17 +830,24 @@ async function procesarMultiplesPedidos(texto) {
     // Antes se exigía 📍; algunos formatos lo omiten o lo cambian.
     if (!/Para\s+agilizar/i.test(bloque)) continue;
 
-    const mapUrl = elegirUrlMapsParaBloque(textoLimpio, bloque, indicePedidoEnLote, urlsGlobal);
-    indicePedidoEnLote += 1;
     const numMatch = bloque.match(/(\d+):\s*\n?\s*Para\s+agilizar/i) || bloque.match(/(\d+):\s*\n/);
     const numLabel = numMatch ? '#' + numMatch[1] : '?';
+    const numeroPedido = numMatch ? parseInt(numMatch[1]) : null;
+
+    // 1) Primero, usa URL asociada al número (si existe).
+    let mapUrl = '';
+    if (numeroPedido != null && urlsPorNumero.has(numeroPedido) && urlsPorNumero.get(numeroPedido).length > 0) {
+      mapUrl = urlsPorNumero.get(numeroPedido).shift();
+    }
+    // 2) Si no hay, intenta heurística por bloque / índice.
+    if (!mapUrl) mapUrl = elegirUrlMapsParaBloque(textoLimpio, bloque, indicePedidoEnLote, urlsGlobal);
+    indicePedidoEnLote += 1;
 
     if (!mapUrl) {
       errores.push(`Pedido ${numLabel}: No se encontró URL de Maps`);
       continue;
     }
 
-    const numeroPedido = numMatch ? parseInt(numMatch[1]) : null;
     const campos = extraerCamposPedido(bloque);
 
     if (btnProcesar) { btnProcesar.textContent = `Procesando pedido ${numLabel}...`; btnProcesar.disabled = true; }
@@ -1166,7 +1225,8 @@ function moverPedidoUnPasoEnOrdenActiva(pedidoId, delta) {
   if (moverPedidoPorId(pedidoId, targetId)) {
     guardarPedidos();
     renderPedidos();
-    actualizarMarcadores();
+    // Al cambiar el orden solo recalculamos la ruta; no recreamos marcadores ni reencuadramos el mapa.
+    redibujarRutaDebounced(120);
   }
 }
 
@@ -1221,6 +1281,46 @@ function ordenItemInsertBeforeDesdeClienteY(listaOrden, clientY) {
 }
 
 let ordenEntregaArrastre = null;
+let ordenEntregaGhostEl = null;
+let ordenEntregaPlaceholderEl = null;
+
+function asegurarGhostOrdenEntrega() {
+  if (ordenEntregaGhostEl && document.body.contains(ordenEntregaGhostEl)) return ordenEntregaGhostEl;
+  const el = document.createElement('div');
+  el.className = 'orden-drag-ghost';
+  el.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(el);
+  ordenEntregaGhostEl = el;
+  return el;
+}
+
+function actualizarGhostOrdenEntrega(clientX, clientY, pedidoId) {
+  const el = asegurarGhostOrdenEntrega();
+  // Solo indicador visual (sin “nota” explicativa).
+  el.textContent = `Pedido #${pedidoId}`;
+  const dx = 14;
+  const dy = 14;
+  el.style.transform = `translate(${Math.round(clientX + dx)}px, ${Math.round(clientY + dy)}px)`;
+}
+
+function ocultarGhostOrdenEntrega() {
+  if (!ordenEntregaGhostEl) return;
+  ordenEntregaGhostEl.style.transform = 'translate(-9999px, -9999px)';
+}
+
+function asegurarPlaceholderOrdenEntrega() {
+  if (ordenEntregaPlaceholderEl && ordenEntregaPlaceholderEl.parentNode) return ordenEntregaPlaceholderEl;
+  const el = document.createElement('div');
+  el.className = 'orden-drop-placeholder';
+  el.setAttribute('aria-hidden', 'true');
+  ordenEntregaPlaceholderEl = el;
+  return el;
+}
+
+function limpiarHintsOrdenEntrega(lista) {
+  if (!lista) return;
+  lista.querySelectorAll('.orden-item.orden-drop-hint').forEach((el) => el.classList.remove('orden-drop-hint'));
+}
 
 function aplicarReordenListaOrdenSegunY(listaOrden, clientY, draggedId) {
   const beforeEl = ordenItemInsertBeforeDesdeClienteY(listaOrden, clientY);
@@ -1239,7 +1339,7 @@ function aplicarReordenListaOrdenSegunY(listaOrden, clientY, draggedId) {
   if (ok) {
     guardarPedidos();
     renderPedidos();
-    actualizarMarcadores();
+    redibujarRutaDebounced(120);
   }
   return ok;
 }
@@ -1247,6 +1347,26 @@ function aplicarReordenListaOrdenSegunY(listaOrden, clientY, draggedId) {
 function ordenItemPointerMove(e) {
   if (!ordenEntregaArrastre || e.pointerId !== ordenEntregaArrastre.pointerId) return;
   e.preventDefault();
+  actualizarGhostOrdenEntrega(e.clientX, e.clientY, ordenEntregaArrastre.pedidoId);
+
+  // Mostrar hueco donde quedaría al soltar.
+  const snap = ordenEntregaArrastre;
+  const { lista } = snap;
+  const panel = lista.closest('.orden-entrega-panel');
+  const bounds = (panel || lista).getBoundingClientRect();
+  if (e.clientX < bounds.left || e.clientX > bounds.right || e.clientY < bounds.top || e.clientY > bounds.bottom) {
+    limpiarHintsOrdenEntrega(lista);
+    return;
+  }
+  const beforeEl = ordenItemInsertBeforeDesdeClienteY(lista, e.clientY);
+  const ph = asegurarPlaceholderOrdenEntrega();
+  if (beforeEl) {
+    beforeEl.classList.add('orden-drop-hint');
+    if (ph !== beforeEl.previousSibling) lista.insertBefore(ph, beforeEl);
+  } else {
+    limpiarHintsOrdenEntrega(lista);
+    if (ph.parentNode !== lista || ph !== lista.lastChild) lista.appendChild(ph);
+  }
 }
 
 function ordenItemPointerEnd(e) {
@@ -1260,6 +1380,10 @@ function ordenItemPointerEnd(e) {
   itemEl.removeEventListener('pointercancel', ordenItemPointerEnd);
 
   itemEl.classList.remove('dragging');
+  ocultarGhostOrdenEntrega();
+  limpiarHintsOrdenEntrega(lista);
+  const panel = lista.closest('.orden-entrega-panel');
+  if (panel) panel.classList.remove('dragging-activo');
   try {
     itemEl.releasePointerCapture(pointerId);
   } catch (_err) {}
@@ -1268,13 +1392,39 @@ function ordenItemPointerEnd(e) {
   const dy = e.clientY - startY;
   if (dx * dx + dy * dy < 36) return;
 
-  const panel = lista.closest('.orden-entrega-panel');
   const bounds = (panel || lista).getBoundingClientRect();
   if (e.clientX < bounds.left || e.clientX > bounds.right || e.clientY < bounds.top || e.clientY > bounds.bottom) {
+    if (ordenEntregaPlaceholderEl && ordenEntregaPlaceholderEl.parentNode) ordenEntregaPlaceholderEl.remove();
+    itemEl.style.display = '';
     return;
   }
 
-  aplicarReordenListaOrdenSegunY(lista, e.clientY, pedidoId);
+  // Usar placeholder como referencia final de inserción (más fiel que usar solo Y).
+  const ph = ordenEntregaPlaceholderEl;
+  let ok = false;
+  if (ph && ph.parentNode === lista) {
+    const after = ph.nextElementSibling;
+    if (after && after.classList && after.classList.contains('orden-item')) {
+      const beforeId = parseInt(after.dataset.id, 10);
+      if (Number.isFinite(beforeId)) ok = moverPedidoAntesDeId(pedidoId, beforeId);
+    } else {
+      const items = [...lista.querySelectorAll('.orden-item:not(.dragging)')];
+      const last = items[items.length - 1];
+      if (last) {
+        const afterId = parseInt(last.dataset.id, 10);
+        if (Number.isFinite(afterId)) ok = moverPedidoDespuesDeId(pedidoId, afterId);
+      }
+    }
+  } else {
+    ok = aplicarReordenListaOrdenSegunY(lista, e.clientY, pedidoId);
+  }
+  if (ph && ph.parentNode) ph.remove();
+  itemEl.style.display = '';
+  if (ok) {
+    guardarPedidos();
+    renderPedidos();
+    redibujarRutaDebounced(120);
+  }
 }
 
 function ordenListaPointerDown(e) {
@@ -1298,9 +1448,17 @@ function ordenListaPointerDown(e) {
     startY: e.clientY
   };
   item.classList.add('dragging');
+  actualizarGhostOrdenEntrega(e.clientX, e.clientY, pedidoId);
+  const panel = lista.closest('.orden-entrega-panel');
+  if (panel) panel.classList.add('dragging-activo');
   try {
     item.setPointerCapture(e.pointerId);
   } catch (_err) {}
+
+  // Placeholder en la posición original del item; escondemos el item para que se vea el hueco.
+  const ph = asegurarPlaceholderOrdenEntrega();
+  if (item.parentNode === lista) lista.insertBefore(ph, item);
+  item.style.display = 'none';
 
   item.addEventListener('pointermove', ordenItemPointerMove);
   item.addEventListener('pointerup', ordenItemPointerEnd);
@@ -2689,6 +2847,25 @@ function dibujarRutaEntreMarcadores() {
   if (!mapa || marcadores.length < 2) return;
   if (rutaLayer) { mapa.removeLayer(rutaLayer); rutaLayer = null; }
 
+  const asegurarEstadoRuta = () => {
+    const mapaEl = document.getElementById('mapa');
+    if (!mapaEl) return null;
+    let el = document.getElementById('estadoRutaMapa');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'estadoRutaMapa';
+    el.className = 'estado-ruta-mapa';
+    mapaEl.appendChild(el);
+    return el;
+  };
+  const setEstadoRuta = (msg) => {
+    const el = asegurarEstadoRuta();
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.textContent = msg;
+    el.style.display = 'block';
+  };
+
   const coordenadas = [];
   for (const p of pedidos) {
     if (p.cancelado) continue;
@@ -2711,23 +2888,74 @@ function dibujarRutaEntreMarcadores() {
     if (lat != null && lng != null) coordenadas.push([lng, lat]);
   }
   if (coordenadas.length < 2) return;
-  const dibujarFallback = () => {
-    const latlngs = coordenadas.map(c => [c[1], c[0]]);
-    rutaLayer = L.polyline(latlngs, { color: '#2196F3', weight: 4, opacity: 0.65, dashArray: '10, 10' }).addTo(mapa);
+  setEstadoRuta('Calculando ruta por calles…');
+
+  // Cancelar cálculo anterior si el usuario reordena rápido.
+  try { if (rutaAbortController) rutaAbortController.abort(); } catch (_e) {}
+  rutaAbortController = new AbortController();
+  const { signal } = rutaAbortController;
+
+  // Pedir la ruta: primero intentamos una sola llamada con todos los puntos (más rápido).
+  // Si falla, caemos a bloques (en paralelo) y unimos geometría.
+  const fetchBloqueOsrm = async (coordsBloque) => {
+    const coordsStr = coordsBloque.map((c) => `${c[0]},${c[1]}`).join(';');
+    const resp = await fetch(
+      `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson`,
+      { signal }
+    );
+    const data = await resp.json();
+    if (data.code !== 'Ok' || !data.routes?.[0]?.geometry?.coordinates) return null;
+    return data.routes[0].geometry.coordinates; // [lng,lat][]
   };
 
-  const coordsStr = coordenadas.map(c => c.join(',')).join(';');
-  fetch(`https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson`)
-    .then(r => r.json())
-    .then(data => {
-      if (data.code !== 'Ok' || !data.routes?.[0]?.geometry?.coordinates) {
-        dibujarFallback();
+  (async () => {
+    try {
+      const coordsRuta = [];
+      const geomAll = await fetchBloqueOsrm(coordenadas);
+      if (geomAll && geomAll.length >= 2) {
+        coordsRuta.push(...geomAll);
+      } else {
+        const MAX_PUNTOS_POR_BLOQUE = 10;
+        const bloques = [];
+        for (let start = 0; start < coordenadas.length; start += (MAX_PUNTOS_POR_BLOQUE - 1)) {
+          const bloque = coordenadas.slice(start, Math.min(start + MAX_PUNTOS_POR_BLOQUE, coordenadas.length));
+          if (bloque.length >= 2) bloques.push({ start, bloque });
+        }
+        const resultados = await Promise.all(
+          bloques.map(async (b) => ({ start: b.start, geom: await fetchBloqueOsrm(b.bloque) }))
+        );
+        resultados.sort((a, b) => a.start - b.start);
+        for (const r of resultados) {
+          if (!r.geom || r.geom.length < 2) {
+            setEstadoRuta('No se pudo calcular la ruta por calles (OSRM). Reintenta o revisa conexión.');
+            return;
+          }
+          let tramoGeom = r.geom;
+          if (coordsRuta.length > 0 && tramoGeom.length > 0) tramoGeom = tramoGeom.slice(1);
+          coordsRuta.push(...tramoGeom);
+        }
+      }
+      if (coordsRuta.length < 2) {
+        setEstadoRuta('No se pudo calcular la ruta por calles.');
         return;
       }
-      const latlngs = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+      const latlngs = coordsRuta.map((c) => [c[1], c[0]]);
       rutaLayer = L.polyline(latlngs, { color: '#2196F3', weight: 5, opacity: 0.7 }).addTo(mapa);
-    })
-    .catch(() => dibujarFallback());
+      setEstadoRuta('');
+      rutaAbortController = null;
+    } catch (_e) {
+      if (_e && (_e.name === 'AbortError' || String(_e).includes('AbortError'))) return;
+      setEstadoRuta('No se pudo calcular la ruta por calles. Reintenta.');
+    }
+  })();
+}
+
+function redibujarRutaDebounced(ms = 250) {
+  try { if (rutaRedrawTimer) clearTimeout(rutaRedrawTimer); } catch (_e) {}
+  rutaRedrawTimer = setTimeout(() => {
+    rutaRedrawTimer = null;
+    dibujarRutaEntreMarcadores();
+  }, ms);
 }
 
 function extraerCoordenadas(url) {
