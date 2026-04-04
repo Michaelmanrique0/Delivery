@@ -27,6 +27,43 @@ function escapeHtmlAttr(s) {
     .replace(/'/g, '&#39;');
 }
 
+/**
+ * Aviso dentro de la página (sin cuadros nativos del navegador).
+ * tipo: success | error | info | warning — tap para cerrar antes.
+ */
+function mostrarToast(mensaje, tipo = 'info', duracionMs = 5200) {
+  const texto = String(mensaje ?? '');
+  let host = document.getElementById('appToastHost');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'appToastHost';
+    host.className = 'app-toast-host';
+  }
+  // Siempre al final del body para quedar por encima de modales (mismo z-index o capas raras del navegador).
+  document.body.appendChild(host);
+  const el = document.createElement('div');
+  el.className = `app-toast app-toast--${tipo}`;
+  el.setAttribute('role', 'status');
+  el.setAttribute('aria-live', 'polite');
+  el.textContent = texto;
+  el.title = 'Clic para cerrar';
+  host.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('app-toast--visible'));
+  const cerrar = () => {
+    el.classList.remove('app-toast--visible');
+    setTimeout(() => {
+      try {
+        el.remove();
+      } catch (_e) {}
+    }, 280);
+  };
+  const t = setTimeout(cerrar, duracionMs);
+  el.addEventListener('click', () => {
+    clearTimeout(t);
+    cerrar();
+  });
+}
+
 function exponerDebugAppDelivery() {
   try {
     window.__appDelivery = {
@@ -131,8 +168,10 @@ function guardarCachePedidos() {
     localStorage.setItem(CACHE_PEDIDOS_KEY, JSON.stringify(dedup));
   } catch (err) {
     console.error('[app-delivery] No se pudo guardar en localStorage:', err);
-    alert(
-      'No se pudieron guardar los pedidos en este navegador. Revisa el modo privado o que no esté bloqueado el almacenamiento local.'
+    mostrarToast(
+      'No se pudieron guardar los pedidos en este navegador. Revisa el modo privado o que no esté bloqueado el almacenamiento local.',
+      'error',
+      8000
     );
   }
 }
@@ -300,6 +339,24 @@ function abrirWhatsAppConTexto(telefono, mensaje) {
   const texto = encodeURIComponent(normalizarTextoParaWhatsApp(mensaje));
   const url = `https://api.whatsapp.com/send?phone=${wa}&text=${texto}&src=delivery&t=${Date.now()}`;
   window.open(url, '_blank');
+}
+
+/**
+ * Intenta abrir WhatsApp en la app (móvil). En escritorio mantiene wa.me en pestaña nueva.
+ */
+function abrirWhatsAppPreferirApp(telefono, mensaje) {
+  const limpio = String(telefono || '').replace(/\D/g, '');
+  if (!limpio) return;
+  const wa = limpio.startsWith('57') ? limpio : `57${limpio}`;
+  const textoNorm = normalizarTextoParaWhatsApp(mensaje);
+  const texto = encodeURIComponent(textoNorm);
+  const ua = navigator.userAgent || '';
+  const esMovil = /Android|iPhone|iPad|iPod|Mobile|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  if (esMovil) {
+    window.location.href = `whatsapp://send?phone=${wa}&text=${texto}`;
+    return;
+  }
+  window.open(`https://wa.me/${wa}?text=${texto}`, '_blank');
 }
 
 function pedidoNuevoBase() {
@@ -502,6 +559,37 @@ function extraerProductosLineasTrasEncabezado(b) {
   return [];
 }
 
+/**
+ * Si no hubo cifras en los patrones principales, busca un monto solo en líneas de valor/recaudo.
+ * Evita el primer $ del texto (suele ser Envío ~12.000) cuando el valor a recoger es 0 o texto.
+ */
+function extraerMontoValorRespaldoSinEnvio(bloque) {
+  const lineas = String(bloque || '').split('\n');
+  const reEtiqueta = new RegExp(
+    '^(?:💰\\s*)?(?:Valor\\s+a\\s+pagar|Valor\\s+a\\s+recoger|A\\s+recoger|Valor|Total|Por\\s+cobrar|Pago|Recaudo)\\b',
+    'i'
+  );
+  for (const raw of lineas) {
+    const L = raw.trim();
+    if (!L) continue;
+    if (/^(?:💰\s*)?Env[ií]o\b/i.test(L)) continue;
+    const idxColon = L.indexOf(':');
+    if (idxColon > 0 && /\benv[ií]o\b/i.test(L.slice(0, idxColon))) continue;
+    if (!reEtiqueta.test(L)) continue;
+    const mDolar = L.match(/\$\s*([\d.,]+)/);
+    if (mDolar) {
+      const d = mDolar[1].replace(/[^\d]/g, '');
+      if (d !== '') return d;
+    }
+    const mCol = L.match(/:\s*([\d.,]+)\s*$/);
+    if (mCol) {
+      const d = mCol[1].replace(/[^\d]/g, '');
+      if (d !== '') return d;
+    }
+  }
+  return null;
+}
+
 function extraerCamposPedido(bloque) {
   const b = normalizarTextoParaExtraerPedido(bloque);
   const finCampo = _RE_FIN_CAMPO_PEDIDO;
@@ -562,9 +650,10 @@ function extraerCamposPedido(bloque) {
     '(?=Env[ií]o|Horario|Producto|¿Todo|Para agilizar|📍|🙋|📲|💰|https?:|\\n\\s*\\d+:\\s*\\n?\\s*Para|$)';
   let valor = '0';
   const valPatrones = [
-    new RegExp(`💰[^:\\n]*:\\s*([\\s\\S]*?)${finValor}`, 'i'),
+    // No tratar 💰 Envío como valor a recoger (el domicilio no es lo que cobras al cliente).
+    new RegExp(`💰(?!\\s*Env[ií]o\\b)[^:\\n]*:\\s*([\\s\\S]*?)${finValor}`, 'iu'),
     new RegExp(
-      '(?:Valor\\s+a\\s+pagar|Valor\\s+a\\s+recoger|A\\s+recoger|Valor|Total|Por\\s+cobrar|Pago|Recaudo)[^:\\n]*:\\s*([\\s\\S]*?)' +
+      '(?:Valor\\s+a\\s+pagar|Valor\\s+a\\s+recoger|A\\s+recoger|Valor(?!\\s+(?:del|de)\\s+env[ií]o)|Total|Por\\s+cobrar|Pago|Recaudo)[^:\\n]*:\\s*([\\s\\S]*?)' +
         finValor,
       'i'
     ),
@@ -581,8 +670,8 @@ function extraerCamposPedido(bloque) {
     }
   }
   if (!valor || valor === '0') {
-    const m2 = b.match(/\$\s*([\d.,]+)/);
-    if (m2) valor = m2[1].replace(/[^\d]/g, '') || '0';
+    const respaldo = extraerMontoValorRespaldoSinEnvio(b);
+    if (respaldo != null) valor = respaldo;
   }
 
   let productos = [];
@@ -699,7 +788,7 @@ async function obtenerCoordenadas(url, direccion) {
 async function procesarPedido() {
   const texto = document.getElementById("textoPedido").value.trim();
   if (!texto) {
-    alert("Por favor, pega el formato del pedido");
+    mostrarToast('Por favor, pega el formato del pedido', 'warning');
     return;
   }
 
@@ -721,7 +810,11 @@ async function procesarPedido() {
     : '';
 
   if (!mapUrl) {
-    alert("No se encontró URL de Google Maps en el texto pegado.\n\nAsegúrate de incluir el enlace de Maps junto con el formato del pedido.");
+    mostrarToast(
+      'No se encontró URL de Google Maps en el texto pegado.\n\nAsegúrate de incluir el enlace de Maps junto con el formato del pedido.',
+      'error',
+      8000
+    );
     return;
   }
 
@@ -734,7 +827,11 @@ async function procesarPedido() {
   if (btnProcesar) { btnProcesar.textContent = textoOriginalBtn; btnProcesar.disabled = false; }
 
   if (!coords) {
-    alert("No se pudieron extraer coordenadas de la URL ni de la dirección.\n\nVerifica que el enlace de Maps o la dirección sean válidos.");
+    mostrarToast(
+      'No se pudieron extraer coordenadas de la URL ni de la dirección.\n\nVerifica que el enlace de Maps o la dirección sean válidos.',
+      'error',
+      8000
+    );
     return;
   }
 
@@ -768,7 +865,7 @@ async function procesarPedido() {
   }, 500);
 
   document.getElementById("textoPedido").value = "";
-  alert(`Pedido #${pedidoId} agregado exitosamente`);
+  mostrarToast(`Pedido #${pedidoId} agregado exitosamente`, 'success');
 }
 
 async function procesarMultiplesPedidos(texto) {
@@ -892,7 +989,7 @@ async function procesarMultiplesPedidos(texto) {
   if (errores.length > 0) {
     msg += `\n\n⚠️ ${errores.length} pedido(s) no agregado(s):\n${errores.join('\n')}`;
   }
-  alert(msg);
+  mostrarToast(msg, errores.length > 0 ? 'warning' : 'success', errores.length > 0 ? 12000 : 6000);
 }
 
 function guardarPedidos() {
@@ -1522,11 +1619,25 @@ function handleDragEnd() {
 function eliminarPedido(index) {
   const pedido = pedidos[index];
   if (!pedido) return;
-  if (!confirm(`¿Estás seguro de eliminar el pedido #${pedido.id}?`)) return;
-  pedidos.splice(index, 1);
-  guardarPedidos();
-  renderPedidos();
-  actualizarMarcadores();
+  const idRef = Number(pedido.id);
+  mostrarModalDecision({
+    titulo: 'Eliminar pedido',
+    texto: `¿Estás seguro de eliminar el pedido #${idRef}?`,
+    textoConfirmar: 'Eliminar',
+    textoCancelar: 'Cancelar',
+    claseConfirmar: 'btn-danger',
+    mostrarSecundario: false,
+    onConfirmar: () => {
+      const ix = pedidos.findIndex((p) => Number(p.id) === idRef);
+      if (ix < 0) return;
+      pedidos.splice(ix, 1);
+      guardarPedidos();
+      renderPedidos();
+      actualizarMarcadores();
+      mostrarToast(`Pedido #${idRef} eliminado.`, 'success');
+    },
+    onCancelar: () => {}
+  });
 }
 
 function marcarEntregado(index) {
@@ -1620,22 +1731,32 @@ function reactivarPedidoCancelado(index) {
 }
 
 function eliminarTodos() {
-  if (!confirm("¿Estás seguro de eliminar TODOS los pedidos? Esta acción no se puede deshacer.")) return;
-  pedidos = [];
-  nextPedidoId = 1;
-  vistaPedidosActual = 'pendientes';
-  vistaPedidosSeleccionadaManual = false;
-  guardarPedidos();
-  renderPedidos();
-  actualizarMarcadores();
-  // Mantener el mapa visible y bien dimensionado aunque no haya pedidos.
-  try {
-    if (mapa) {
-      mapaAjustado = false;
-      mapa.invalidateSize();
-      ajustarMapaConReintentos();
-    }
-  } catch (_e) {}
+  mostrarModalDecision({
+    titulo: 'Eliminar todos los pedidos',
+    texto: '¿Estás seguro de eliminar TODOS los pedidos? Esta acción no se puede deshacer.',
+    textoConfirmar: 'Eliminar todo',
+    textoCancelar: 'Cancelar',
+    claseConfirmar: 'btn-danger',
+    mostrarSecundario: false,
+    onConfirmar: () => {
+      pedidos = [];
+      nextPedidoId = 1;
+      vistaPedidosActual = 'pendientes';
+      vistaPedidosSeleccionadaManual = false;
+      guardarPedidos();
+      renderPedidos();
+      actualizarMarcadores();
+      try {
+        if (mapa) {
+          mapaAjustado = false;
+          mapa.invalidateSize();
+          ajustarMapaConReintentos();
+        }
+      } catch (_e) {}
+      mostrarToast('Todos los pedidos fueron eliminados.', 'success');
+    },
+    onCancelar: () => {}
+  });
 }
 
 // --- Editar pedido ---
@@ -1724,7 +1845,10 @@ function editarPedido(index) {
 function llamar(numero) {
   if (!numero) { mostrarAvisoEnApp('No hay número de teléfono disponible', 'Contacto'); return; }
   const n = numero.toString().replace(/\D/g, '');
-  if (!n) { alert("Número de teléfono inválido"); return; }
+  if (!n) {
+    mostrarToast('Número de teléfono inválido', 'warning');
+    return;
+  }
   window.location.href = `tel:${n}`;
 }
 
@@ -1732,14 +1856,14 @@ function copiarDireccionPedido(index) {
   const pedido = pedidos[index];
   const direccion = pedido && pedido.direccion ? String(pedido.direccion).trim() : '';
   if (!direccion) {
-    alert("No hay dirección para copiar");
+    mostrarToast('No hay dirección para copiar', 'warning');
     return;
   }
 
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(direccion)
-      .then(() => alert("Dirección copiada"))
-      .catch(() => alert("No se pudo copiar la dirección"));
+      .then(() => mostrarToast('Dirección copiada', 'success'))
+      .catch(() => mostrarToast('No se pudo copiar la dirección', 'error'));
     return;
   }
 
@@ -1752,9 +1876,9 @@ function copiarDireccionPedido(index) {
   textarea.select();
   try {
     const ok = document.execCommand('copy');
-    alert(ok ? "Dirección copiada" : "No se pudo copiar la dirección");
+    mostrarToast(ok ? 'Dirección copiada' : 'No se pudo copiar la dirección', ok ? 'success' : 'error');
   } catch (e) {
-    alert("No se pudo copiar la dirección");
+    mostrarToast('No se pudo copiar la dirección', 'error');
   } finally {
     document.body.removeChild(textarea);
   }
@@ -1763,7 +1887,10 @@ function copiarDireccionPedido(index) {
 function whatsappLlamar(numero) {
   if (!numero) { mostrarAvisoEnApp('No hay número de teléfono disponible', 'Contacto'); return; }
   const n = numero.toString().replace(/\D/g, '');
-  if (!n) { alert("Número de teléfono inválido"); return; }
+  if (!n) {
+    mostrarToast('Número de teléfono inválido', 'warning');
+    return;
+  }
   const wa = n.startsWith('57') ? n : `57${n}`;
   window.open(`https://wa.me/${wa}`, "_blank");
 }
@@ -1771,7 +1898,10 @@ function whatsappLlamar(numero) {
 function whatsappMensaje(numero) {
   if (!numero) { mostrarAvisoEnApp('No hay número de teléfono disponible', 'Contacto'); return; }
   const n = numero.toString().replace(/\D/g, '');
-  if (!n) { alert("Número de teléfono inválido"); return; }
+  if (!n) {
+    mostrarToast('Número de teléfono inválido', 'warning');
+    return;
+  }
   const wa = n.startsWith('57') ? n : `57${n}`;
   window.open(`https://wa.me/${wa}?text=Hola`, "_blank");
 }
@@ -1868,12 +1998,29 @@ function construirMensajeSoporte(pedido, tipoProblema) {
     return `El cliente indica que le hacen falta productos en el pedido ${idPedido}. Producto(s) del pedido: ${productos}.`;
   }
 
-  const detalle = prompt(
-    `Describe el problema del pedido ${idPedido}:`,
-    `Pedido ${idPedido}: `
-  );
-  if (!detalle || !detalle.trim()) return null;
-  return `${detalle.trim()} Producto(s): ${productos}.`;
+  if (tipoProblema === 'personalizado') {
+    const lineasProd =
+      Array.isArray(pedido.productos) && pedido.productos.length > 0
+        ? pedido.productos
+            .map((p) => String(p || '').trim())
+            .filter(Boolean)
+            .map((p) => `- ${p}`)
+        : ['- No especificado'];
+    const listaProductos = lineasProd.join('\n');
+    const extra = prompt(
+      'Detalle adicional (opcional). Se incluirá el aviso de que el cliente no responde y debajo la lista de productos, cada uno en una línea.',
+      ''
+    );
+    if (extra === null) return null;
+    let cuerpo = `Pedido #${idPedido}: El cliente no responde.`;
+    if (extra && String(extra).trim()) {
+      cuerpo += `\n\n${String(extra).trim()}`;
+    }
+    cuerpo += `\n\nProductos:\n${listaProductos}`;
+    return cuerpo;
+  }
+
+  return null;
 }
 
 function enviarMensajeSoporte(tipoProblema) {
@@ -1888,7 +2035,7 @@ function enviarMensajeSoporte(tipoProblema) {
   if (!mensaje) return;
 
   const wa = obtenerSoporteWhatsApp();
-  window.open(`https://wa.me/${wa}?text=${encodeURIComponent(mensaje)}`, '_blank');
+  abrirWhatsAppPreferirApp(wa, mensaje);
   cerrarModalMensajeSoporte();
 }
 
@@ -2126,15 +2273,19 @@ function confirmarMontosMixtosPago() {
   const montoEfectivo = parseMontoEntero(inputEfectivo.value);
 
   if (!(metodo === 'nequi_efectivo' || metodo === 'daviplata_efectivo')) {
-    alert('Selecciona un método de pago mixto válido.');
+    mostrarToast('Selecciona un método de pago mixto válido.', 'warning');
     return;
   }
   if (montoDigital <= 0 || montoEfectivo <= 0) {
-    alert('Debes ingresar ambos montos para registrar el pago mixto.');
+    mostrarToast('Debes ingresar ambos montos para registrar el pago mixto.', 'warning');
     return;
   }
   if (montoDigital + montoEfectivo !== totalPedido) {
-    alert(`La suma de montos debe ser igual al valor del pedido ($${totalPedido.toLocaleString('es-CO')}).`);
+    mostrarToast(
+      `La suma de montos debe ser igual al valor del pedido ($${totalPedido.toLocaleString('es-CO')}).`,
+      'warning',
+      7000
+    );
     return;
   }
 
@@ -2266,7 +2417,10 @@ function abrirNavegacionConSelector(index, pedidoId) {
   if (!pedidoFinal) return;
 
   const u = getUbicacionPedido(indexFinal, pedidoId);
-  if (!u) { alert('No hay ubicación disponible para este pedido.'); return; }
+  if (!u) {
+    mostrarToast('No hay ubicación disponible para este pedido.', 'warning');
+    return;
+  }
   marcarEnCurso(indexFinal);
 
   const isAndroid = /Android/i.test(navigator.userAgent);
@@ -2312,7 +2466,10 @@ function abrirNavegacion(tipo, index, pedidoId) {
   if (!pedidoFinal) return;
 
   const u = getUbicacionPedido(indexFinal, pedidoId);
-  if (!u) { alert('No hay ubicación disponible para este pedido.'); return; }
+  if (!u) {
+    mostrarToast('No hay ubicación disponible para este pedido.', 'warning');
+    return;
+  }
 
   if (tipo === 'apps') {
     abrirNavegacionConSelector(indexFinal, pedidoId);
@@ -2720,7 +2877,7 @@ function actualizarMarcadores() {
           if (aviso) {
             if (aviso !== firmaUltimoAvisoUbicacionesCercanas) {
               firmaUltimoAvisoUbicacionesCercanas = aviso;
-              setTimeout(() => alert(aviso), 200);
+              setTimeout(() => mostrarToast(aviso, 'warning', 10000), 200);
             }
           } else {
             firmaUltimoAvisoUbicacionesCercanas = '';
@@ -3001,7 +3158,7 @@ function procesarURLMapaPedido(url, pedidoId, productos, callback) {
 
   const { lat, lng } = coords;
   if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    alert(`No se pudieron extraer coordenadas válidas de la URL para el pedido #${pedidoId}.`);
+    mostrarToast(`No se pudieron extraer coordenadas válidas de la URL para el pedido #${pedidoId}.`, 'error', 8000);
     if (callback) callback();
     return;
   }
@@ -3013,7 +3170,7 @@ function procesarURLMapaPedido(url, pedidoId, productos, callback) {
     marcadores.push({ pedidoId, marker, latReal: lat, lngReal: lng });
     if (callback) callback({ lat, lng });
   } catch (error) {
-    alert(`Error al agregar marcador para el pedido #${pedidoId}: ${error.message}`);
+    mostrarToast(`Error al agregar marcador para el pedido #${pedidoId}: ${error.message}`, 'error', 8000);
     if (callback) callback(null);
   }
 }
@@ -3391,7 +3548,7 @@ async function abrirModalRespaldoTexto() {
   } catch (e) {
     console.error(e);
     textarea.value = '';
-    alert('No se pudo preparar el respaldo en texto.');
+    mostrarToast('No se pudo preparar el respaldo en texto.', 'error');
   }
   modal.style.display = 'flex';
 }
@@ -3405,7 +3562,7 @@ function copiarTextoRespaldo() {
   const texto = ta.value;
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(texto).then(
-      () => alert('Texto copiado.'),
+      () => mostrarToast('Texto copiado.', 'success'),
       () => copiarPayloadQrPedidosFallback(texto)
     );
   } else {
@@ -3487,18 +3644,7 @@ function aplicarPedidosImportados(lista) {
   return deduplicarPedidosPorId(mapped);
 }
 
-async function importarPedidosDesdeTextoPlano(texto, origen = 'texto pegado') {
-  const data = await parsearTextoImportPedidosUniversal(String(texto || ''));
-  const lista = extraerListaPedidosDeImportParsed(data);
-  if (lista.length === 0) {
-    alert(`El ${origen} no contiene una lista de pedidos válida.`);
-    return false;
-  }
-  const reemplazar = confirm(
-    '¿Reemplazar todos los pedidos actuales por los importados?\n\n' +
-      'Aceptar = reemplazar todo\n' +
-      'Cancelar = combinar (mismo id: gana el importado)'
-  );
+function aplicarImportacionPedidosDesdeLista(lista, reemplazar) {
   const incoming = aplicarPedidosImportados(lista);
   if (reemplazar) {
     pedidos = incoming;
@@ -3515,8 +3661,41 @@ async function importarPedidosDesdeTextoPlano(texto, origen = 'texto pegado') {
   guardarPedidos();
   renderPedidos();
   actualizarMarcadores();
-  alert(`Importación lista: ${incoming.length} pedido(s).`);
-  return true;
+  mostrarToast(`Importación lista: ${incoming.length} pedido(s).`, 'success');
+}
+
+async function importarPedidosDesdeTextoPlano(texto, origen = 'texto pegado') {
+  let data;
+  try {
+    data = await parsearTextoImportPedidosUniversal(String(texto || ''));
+  } catch (e) {
+    console.error(e);
+    mostrarToast(`No se pudo leer el ${origen}. Verifica el formato (D1… o JSON válido).`, 'error', 8000);
+    return false;
+  }
+  const lista = extraerListaPedidosDeImportParsed(data);
+  if (lista.length === 0) {
+    mostrarToast(`El ${origen} no contiene una lista de pedidos válida.`, 'error', 8000);
+    return false;
+  }
+  return await new Promise((resolve) => {
+    mostrarModalDecision({
+      titulo: 'Importar pedidos',
+      texto:
+        '¿Cómo quieres importar?\n\n• Reemplazar todo: borra los pedidos actuales y deja solo los importados.\n• Combinar: mezcla; si un id coincide, gana el importado.',
+      textoConfirmar: 'Reemplazar todo',
+      textoCancelar: 'Combinar',
+      mostrarSecundario: false,
+      onConfirmar: () => {
+        aplicarImportacionPedidosDesdeLista(lista, true);
+        resolve(true);
+      },
+      onCancelar: () => {
+        aplicarImportacionPedidosDesdeLista(lista, false);
+        resolve(true);
+      }
+    });
+  });
 }
 
 function importarPedidosDesdeArchivo(evt) {
@@ -3528,8 +3707,10 @@ function importarPedidosDesdeArchivo(evt) {
       await importarPedidosDesdeTextoPlano(String(reader.result || ''), 'archivo');
     } catch (e) {
       console.error(e);
-      alert(
-        'No se pudo leer el archivo. Usa el código D1… de respaldo o un archivo válido exportado por esta app.'
+      mostrarToast(
+        'No se pudo leer el archivo. Usa el código D1… de respaldo o un archivo válido exportado por esta app.',
+        'error',
+        8000
       );
     } finally {
       evt.target.value = '';
@@ -3572,7 +3753,7 @@ async function confirmarImportarRespaldoPegado() {
   if (!ta) return;
   const texto = String(ta.value || '').trim();
   if (!texto) {
-    alert('Pega el texto de respaldo antes de importar.');
+    mostrarToast('Pega el texto de respaldo antes de importar.', 'warning');
     ta.focus();
     return;
   }
@@ -3581,7 +3762,7 @@ async function confirmarImportarRespaldoPegado() {
     if (ok) cerrarModalImportarRespaldo();
   } catch (e) {
     console.error(e);
-    alert('No se pudo importar el texto pegado. Verifica que esté completo y comience con D1…');
+    mostrarToast('No se pudo importar el texto pegado. Verifica que esté completo y comience con D1…', 'error', 8000);
   }
 }
 
@@ -3605,8 +3786,10 @@ function copiarPayloadQrPedidos() {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(texto).then(
       () =>
-        alert(
-          'Copiado. En el otro equipo: guarda el texto en un archivo .txt o úsalo desde Importar, según tu flujo.'
+        mostrarToast(
+          'Copiado. En el otro equipo: guarda el texto en un archivo .txt o úsalo desde Importar, según tu flujo.',
+          'success',
+          8000
         ),
       () => copiarPayloadQrPedidosFallback(texto)
     );
@@ -3618,9 +3801,9 @@ function copiarPayloadQrPedidos() {
 function copiarPayloadQrPedidosFallback(texto) {
   try {
     document.execCommand('copy');
-    alert('Copiado. Si no funcionó, selecciona el texto manualmente.');
+    mostrarToast('Copiado. Si no funcionó, selecciona el texto manualmente.', 'info', 7000);
   } catch (_e) {
-    alert('Selecciona el texto del cuadro y cópialo con Ctrl+C.');
+    mostrarToast('Selecciona el texto del cuadro y cópialo con Ctrl+C.', 'warning', 8000);
   }
 }
 
