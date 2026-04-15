@@ -4794,29 +4794,62 @@ function actualizarTextosRegistroAuth() {
   }
 }
 
-let ultimoEnlaceRecuperacion = '';
+/** Token temporal para POST /api/auth/reset-password desde el modal de recuperación. */
+let modalRecuperarResetToken = '';
+let modalRecuperarVerifyToken = '';
+let modalRecuperarEmailComprobado = '';
+
+function resetUiModalRecuperarClave() {
+  const err = document.getElementById('modalRecuperarError');
+  const noExiste = document.getElementById('modalRecuperarNoExiste');
+  const bloqueExiste = document.getElementById('modalRecuperarBloqueExiste');
+  const bloquePass = document.getElementById('modalRecuperarBloqueNuevaPass');
+  const bloqueCorreo = document.getElementById('modalRecuperarBloqueCorreo');
+  const accIni = document.getElementById('modalRecuperarAccionesInicial');
+  const btnComprobar = document.getElementById('btnComprobarCorreoRecuperar');
+  const btnConf = document.getElementById('btnModalConfirmarCorreoPrimero');
+  const btnAct = document.getElementById('btnModalActualizarPass');
+  const hint = document.getElementById('modalRecuperarHintExiste');
+  const p1 = document.getElementById('modalRecuperarPass1');
+  const p2 = document.getElementById('modalRecuperarPass2');
+  const errP = document.getElementById('modalRecuperarPassError');
+  if (err) err.textContent = '';
+  if (noExiste) {
+    noExiste.style.display = 'none';
+    noExiste.textContent = '';
+  }
+  if (bloqueExiste) bloqueExiste.style.display = 'none';
+  if (bloquePass) bloquePass.style.display = 'none';
+  if (bloqueCorreo) bloqueCorreo.style.display = 'block';
+  if (accIni) accIni.style.display = 'flex';
+  if (btnComprobar) btnComprobar.style.display = '';
+  if (btnConf) btnConf.style.display = 'none';
+  if (btnAct) btnAct.style.display = 'none';
+  if (hint) hint.textContent = 'Correo registrado. Continúa para restablecer la contraseña.';
+  if (p1) p1.value = '';
+  if (p2) p2.value = '';
+  if (errP) errP.textContent = '';
+  modalRecuperarResetToken = '';
+  modalRecuperarVerifyToken = '';
+  modalRecuperarEmailComprobado = '';
+}
 
 function abrirModalRecuperarClave() {
   const modal = document.getElementById('modalRecuperarClave');
   const inp = document.getElementById('recuperarEmail');
-  const err = document.getElementById('modalRecuperarError');
-  const wrap = document.getElementById('modalRecuperarLinkWrap');
-  const urlBox = document.getElementById('modalRecuperarUrlText');
   const sinMail = document.getElementById('modalRecuperarSinMail');
   const ayuda = document.getElementById('modalRecuperarAyuda');
-  if (err) err.textContent = '';
+  resetUiModalRecuperarClave();
   if (sinMail) {
     sinMail.style.display = 'none';
     sinMail.textContent = '';
   }
-  if (wrap) wrap.style.display = 'none';
-  if (urlBox) urlBox.textContent = '';
-  ultimoEnlaceRecuperacion = '';
   if (inp) inp.value = '';
+  if (inp) inp.disabled = false;
   if (ayuda) {
     ayuda.textContent = authEnlacesSinCorreo
-      ? 'No se enviará correo: al pulsar «Enviar enlace» verás aquí abajo un enlace para confirmar el correo o restablecer la contraseña, según tu cuenta.'
-      : 'Te enviaremos un correo con un enlace para elegir una contraseña nueva (válido 1 hora). Si tu cuenta aún no tiene el correo confirmado, recibirás de nuevo el enlace de confirmación.';
+      ? 'Comprueba si tu correo está registrado. Si existe y aún no está verificado, primero confírmalo; luego podrás elegir una contraseña nueva aquí mismo.'
+      : 'Comprueba si tu correo está registrado. Si existe, te enviaremos un enlace para restablecer la contraseña o podrás continuar según la configuración del servidor.';
   }
   if (modal) {
     modal.style.display = 'flex';
@@ -4834,14 +4867,17 @@ async function actualizarAvisoCorreoEnModalRecuperar() {
     if (s.authLinksInResponse) {
       sinMail.style.display = 'block';
       sinMail.textContent =
-        'Modo sin correo: el enlace aparecerá en esta ventana tras enviar la solicitud (variable AUTH_LINKS_IN_RESPONSE en el servidor).';
+        'Modo sin correo (AUTH_LINKS_IN_RESPONSE): tras comprobar el correo podrás confirmarlo y cambiar la contraseña en esta ventana.';
       return;
     }
     if (!s.mailConfigured) {
       sinMail.style.display = 'block';
       sinMail.textContent =
         'El servidor no tiene configurado el envío de correo (MAIL_FROM y RESEND_API_KEY, o SMTP). ' +
-        'Activa AUTH_LINKS_IN_RESPONSE=true para obtener enlaces aquí, o configura un proveedor de correo.';
+        'Activa AUTH_LINKS_IN_RESPONSE=true para recuperar la contraseña sin correo, o configura un proveedor de correo.';
+    } else {
+      sinMail.style.display = 'none';
+      sinMail.textContent = '';
     }
   } catch (_e) {
     /* sin bloquear el modal */
@@ -4850,19 +4886,71 @@ async function actualizarAvisoCorreoEnModalRecuperar() {
 
 function cerrarModalRecuperarClave() {
   const modal = document.getElementById('modalRecuperarClave');
+  resetUiModalRecuperarClave();
+  const inp = document.getElementById('recuperarEmail');
+  if (inp) {
+    inp.value = '';
+    inp.disabled = false;
+  }
   if (modal) {
     modal.style.display = 'none';
     modal.setAttribute('aria-hidden', 'true');
   }
 }
 
-async function enviarSolicitudRecuperarClave() {
+async function comprobarCorreoParaRecuperacion() {
   const inp = document.getElementById('recuperarEmail');
   const err = document.getElementById('modalRecuperarError');
-  const wrap = document.getElementById('modalRecuperarLinkWrap');
-  const urlBox = document.getElementById('modalRecuperarUrlText');
+  const noExiste = document.getElementById('modalRecuperarNoExiste');
+  const bloqueExiste = document.getElementById('modalRecuperarBloqueExiste');
+  const btnAct = document.getElementById('btnModalActualizarPass');
+  const btnConf = document.getElementById('btnModalConfirmarCorreoPrimero');
+  const btnComprobar = document.getElementById('btnComprobarCorreoRecuperar');
   if (err) err.textContent = '';
+  if (noExiste) {
+    noExiste.style.display = 'none';
+    noExiste.textContent = '';
+  }
   const email = String(inp?.value || '').trim();
+  if (!correoPareceValido(email)) {
+    if (err) err.textContent = 'Escribe un correo válido.';
+    return;
+  }
+  try {
+    const data = await apiJson('/api/auth/check-email-for-recovery', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+    if (!data.exists) {
+      if (noExiste) {
+        noExiste.style.display = 'block';
+        noExiste.textContent = 'No hay ninguna cuenta registrada con ese correo.';
+      }
+      if (bloqueExiste) bloqueExiste.style.display = 'none';
+      if (btnAct) btnAct.style.display = 'none';
+      if (btnConf) btnConf.style.display = 'none';
+      return;
+    }
+    modalRecuperarEmailComprobado = email;
+    if (inp) inp.disabled = true;
+    if (btnComprobar) btnComprobar.style.display = 'none';
+    if (bloqueExiste) bloqueExiste.style.display = 'block';
+    if (btnConf) btnConf.style.display = 'none';
+    if (btnAct) btnAct.style.display = 'block';
+  } catch (e) {
+    if (err) err.textContent = String(e.message || e);
+    if (e.detail) mostrarToast(String(e.detail), 'warning', 8000);
+  }
+}
+
+async function solicitarTokenRecuperacionDesdeModal() {
+  const err = document.getElementById('modalRecuperarError');
+  const hint = document.getElementById('modalRecuperarHintExiste');
+  const btnAct = document.getElementById('btnModalActualizarPass');
+  const btnConf = document.getElementById('btnModalConfirmarCorreoPrimero');
+  const bloquePass = document.getElementById('modalRecuperarBloqueNuevaPass');
+  if (err) err.textContent = '';
+  const email = modalRecuperarEmailComprobado || String(document.getElementById('recuperarEmail')?.value || '').trim();
   if (!correoPareceValido(email)) {
     if (err) err.textContent = 'Escribe un correo válido.';
     return;
@@ -4872,35 +4960,138 @@ async function enviarSolicitudRecuperarClave() {
       method: 'POST',
       body: JSON.stringify({ email }),
     });
-    const enlace = String(data.resetUrl || data.verifyUrl || '').trim();
-    ultimoEnlaceRecuperacion = enlace;
-    if (enlace) {
-      if (wrap) wrap.style.display = 'block';
-      if (urlBox) urlBox.textContent = enlace;
-      mostrarToast(data.message || 'Copia el enlace mostrado abajo.', 'success', 12000);
-    } else {
-      if (wrap) wrap.style.display = 'none';
-      if (urlBox) urlBox.textContent = '';
+    if (!authEnlacesSinCorreo) {
       mostrarToast(data.message || 'Revisa tu correo (y la carpeta de spam).', 'success', 9000);
       cerrarModalRecuperarClave();
+      resetUiModalRecuperarClave();
+      return;
     }
+    if (data.pendingEmailVerification && data.verifyToken) {
+      modalRecuperarVerifyToken = String(data.verifyToken);
+      modalRecuperarResetToken = '';
+      if (hint) hint.textContent = data.message || 'Confirma tu correo para poder elegir una contraseña nueva.';
+      if (btnAct) btnAct.style.display = 'none';
+      if (btnConf) btnConf.style.display = 'block';
+      mostrarToast('Confirma tu correo con el botón de abajo.', 'success', 8000);
+      return;
+    }
+    const token = String(data.resetToken || '').trim();
+    if (token) {
+      modalRecuperarResetToken = token;
+      modalRecuperarVerifyToken = '';
+      if (bloquePass) bloquePass.style.display = 'block';
+      if (btnAct) btnAct.style.display = 'none';
+      if (btnConf) btnConf.style.display = 'none';
+      const bloqueExiste = document.getElementById('modalRecuperarBloqueExiste');
+      if (bloqueExiste) bloqueExiste.style.display = 'none';
+      mostrarToast(data.message || 'Escribe tu nueva contraseña.', 'success', 6000);
+      return;
+    }
+    if (err) err.textContent = 'No se pudo obtener el enlace de recuperación. Revisa la configuración del servidor.';
   } catch (e) {
     const det = e.detail ? ` ${String(e.detail)}` : '';
     const texto = `${String(e.message || e)}${det}`.trim();
     if (err) err.textContent = texto;
-    const tipoToast = e.status === 404 ? 'warning' : 'error';
-    mostrarToast(texto, tipoToast, e.status === 404 ? 7000 : 12000);
+    mostrarToast(texto, 'error', 10000);
   }
 }
 
-async function copiarEnlaceRecuperar() {
-  if (!ultimoEnlaceRecuperacion) return;
-  try {
-    await navigator.clipboard.writeText(ultimoEnlaceRecuperacion);
-    mostrarToast('Enlace copiado al portapapeles', 'success');
-  } catch (_e) {
-    mostrarToast('No se pudo copiar automáticamente; selecciona el texto del enlace.', 'warning');
+async function confirmarCorreoDesdeModalRecuperar() {
+  const err = document.getElementById('modalRecuperarError');
+  const hint = document.getElementById('modalRecuperarHintExiste');
+  const btnConf = document.getElementById('btnModalConfirmarCorreoPrimero');
+  const btnAct = document.getElementById('btnModalActualizarPass');
+  const bloquePass = document.getElementById('modalRecuperarBloqueNuevaPass');
+  if (err) err.textContent = '';
+  const v = String(modalRecuperarVerifyToken || '').trim();
+  if (!v) {
+    if (err) err.textContent = 'Falta el token de verificación. Vuelve a intentar.';
+    return;
   }
+  try {
+    await apiJson('/api/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ token: v }),
+    });
+    modalRecuperarVerifyToken = '';
+    if (btnConf) btnConf.style.display = 'none';
+    mostrarToast('Correo confirmado. Ahora puedes elegir una contraseña nueva.', 'success', 8000);
+    const email = modalRecuperarEmailComprobado || String(document.getElementById('recuperarEmail')?.value || '').trim();
+    const data = await apiJson('/api/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+    const token = String(data.resetToken || '').trim();
+    if (token) {
+      modalRecuperarResetToken = token;
+      if (bloquePass) bloquePass.style.display = 'block';
+      if (hint) hint.textContent = 'Escribe y guarda tu nueva contraseña.';
+      const bloqueExiste = document.getElementById('modalRecuperarBloqueExiste');
+      if (bloqueExiste) bloqueExiste.style.display = 'none';
+      return;
+    }
+    if (err) err.textContent = 'No se pudo iniciar el cambio de contraseña. Intenta de nuevo.';
+  } catch (e) {
+    if (err) err.textContent = String(e.message || e);
+    mostrarToast(String(e.message || e), 'error', 9000);
+  }
+}
+
+async function guardarNuevaContrasenaModalRecuperar() {
+  const err = document.getElementById('modalRecuperarPassError');
+  const token = String(modalRecuperarResetToken || '').trim();
+  const p1 = String(document.getElementById('modalRecuperarPass1')?.value || '');
+  const p2 = String(document.getElementById('modalRecuperarPass2')?.value || '');
+  if (err) err.textContent = '';
+  if (!token) {
+    if (err) err.textContent = 'Sesión de recuperación no válida. Cierra y vuelve a empezar.';
+    return;
+  }
+  if (p1.length < 6) {
+    if (err) err.textContent = 'La contraseña debe tener al menos 6 caracteres.';
+    return;
+  }
+  if (p1 !== p2) {
+    if (err) err.textContent = 'Las contraseñas no coinciden.';
+    return;
+  }
+  try {
+    const data = await apiJson('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, password: p1 }),
+    });
+    setAuthToken(data.token);
+    cerrarModalRecuperarClave();
+    resetUiModalRecuperarClave();
+    await entrarAppConSesion(data.user);
+  } catch (e) {
+    if (err) err.textContent = String(e.message || e);
+  }
+}
+
+function volverModalRecuperarAOtroCorreo() {
+  const inp = document.getElementById('recuperarEmail');
+  resetUiModalRecuperarClave();
+  if (inp) {
+    inp.value = '';
+    inp.disabled = false;
+  }
+}
+
+function cancelarFormNuevaPassModalRecuperar() {
+  const bloquePass = document.getElementById('modalRecuperarBloqueNuevaPass');
+  const bloqueExiste = document.getElementById('modalRecuperarBloqueExiste');
+  const btnAct = document.getElementById('btnModalActualizarPass');
+  const errP = document.getElementById('modalRecuperarPassError');
+  modalRecuperarResetToken = '';
+  if (bloquePass) bloquePass.style.display = 'none';
+  if (bloqueExiste) bloqueExiste.style.display = 'block';
+  if (btnAct) btnAct.style.display = 'block';
+  if (errP) errP.textContent = '';
+  const p1 = document.getElementById('modalRecuperarPass1');
+  const p2 = document.getElementById('modalRecuperarPass2');
+  if (p1) p1.value = '';
+  if (p2) p2.value = '';
 }
 
 async function copiarEnlaceVerificacion() {
@@ -5391,11 +5582,23 @@ async function iniciarFlujoAuth() {
     if (fr) fr.addEventListener('submit', onSubmitRegistro);
     document.getElementById('btnRecuperarClave')?.addEventListener('click', () => abrirModalRecuperarClave());
     document.getElementById('btnCerrarModalRecuperar')?.addEventListener('click', () => cerrarModalRecuperarClave());
-    document.getElementById('btnEnviarRecuperar')?.addEventListener('click', () => {
-      void enviarSolicitudRecuperarClave();
+    document.getElementById('btnComprobarCorreoRecuperar')?.addEventListener('click', () => {
+      void comprobarCorreoParaRecuperacion();
     });
-    document.getElementById('btnCopiarEnlaceRecuperar')?.addEventListener('click', () => {
-      void copiarEnlaceRecuperar();
+    document.getElementById('btnModalActualizarPass')?.addEventListener('click', () => {
+      void solicitarTokenRecuperacionDesdeModal();
+    });
+    document.getElementById('btnModalConfirmarCorreoPrimero')?.addEventListener('click', () => {
+      void confirmarCorreoDesdeModalRecuperar();
+    });
+    document.getElementById('btnModalRecuperarOtraCuenta')?.addEventListener('click', () => {
+      volverModalRecuperarAOtroCorreo();
+    });
+    document.getElementById('btnModalGuardarNuevaPass')?.addEventListener('click', () => {
+      void guardarNuevaContrasenaModalRecuperar();
+    });
+    document.getElementById('btnModalCancelarNuevaPass')?.addEventListener('click', () => {
+      cancelarFormNuevaPassModalRecuperar();
     });
     document.getElementById('btnCopiarEnlaceVerificacion')?.addEventListener('click', () => {
       void copiarEnlaceVerificacion();

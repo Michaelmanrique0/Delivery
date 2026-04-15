@@ -1830,6 +1830,11 @@ button i,
   margin-top: 16px;
 }
 
+.auth-modal-acciones--stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
 .app-header-inner {
   display: flex;
   align-items: flex-start;

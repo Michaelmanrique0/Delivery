@@ -342,6 +342,19 @@ app.post(
 );
 
 app.post(
+  '/api/auth/check-email-for-recovery',
+  asyncHandler(async (req, res) => {
+    const email = normalizeEmail(req.body?.email || '');
+    if (!correoValido(email)) {
+      res.status(400).json({ error: 'Indica un correo electrónico válido.' });
+      return;
+    }
+    const row = await getUserRowByEmail(email);
+    res.json({ exists: !!row });
+  })
+);
+
+app.post(
   '/api/auth/forgot-password',
   asyncHandler(async (req, res) => {
     const email = normalizeEmail(req.body?.email || '');
@@ -362,20 +375,23 @@ app.post(
       if (!verificado) {
         const vtoken = await createVerifyEmailToken(row.id);
         // eslint-disable-next-line no-console
-        console.log('[delivery] forgot-password: enlace de CONFIRMACIÓN (sin correo; AUTH_LINKS_IN_RESPONSE).');
+        console.log('[delivery] forgot-password: token de CONFIRMACIÓN (sin correo; AUTH_LINKS_IN_RESPONSE).');
         res.json({
           ok: true,
+          pendingEmailVerification: true,
           message:
-            'Tu cuenta aún no tiene el correo confirmado. Copia el enlace de abajo para confirmarlo (no se envía correo en este modo).',
+            'Tu cuenta aún no tiene el correo confirmado. Pulsa «Confirmar correo» para continuar y luego podrás elegir una contraseña nueva.',
+          verifyToken: vtoken,
           verifyUrl: buildVerifyUrl(vtoken, req),
         });
       } else {
         const token = await createPasswordResetToken(row.id);
         // eslint-disable-next-line no-console
-        console.log('[delivery] forgot-password: enlace RESTABLECER contraseña (sin correo; AUTH_LINKS_IN_RESPONSE).');
+        console.log('[delivery] forgot-password: token RESTABLECER contraseña (sin correo; AUTH_LINKS_IN_RESPONSE).');
         res.json({
           ok: true,
-          message: 'Copia el enlace de abajo para elegir una contraseña nueva (válido 1 hora; no se envía correo en este modo).',
+          message: 'Elige una contraseña nueva (válido 1 hora; no se envía correo en este modo).',
+          resetToken: token,
           resetUrl: buildResetUrl(token, req),
         });
       }

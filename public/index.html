@@ -103,20 +103,41 @@
 <div id="modalRecuperarClave" class="modal-no-entregado-backdrop" style="display:none;" aria-hidden="true">
   <div class="modal-no-entregado-card auth-modal-recuperar">
     <h3>Recuperar contraseña</h3>
-    <p id="modalRecuperarAyuda" class="auth-modal-ayuda">Te enviaremos un correo con un enlace para elegir una contraseña nueva (válido 1 hora). Si tu cuenta aún no tiene el correo confirmado, recibirás de nuevo el enlace de confirmación.</p>
+    <p id="modalRecuperarAyuda" class="auth-modal-ayuda">Escribe tu correo y comprueba si está registrado. Si existe, podrás actualizar la contraseña.</p>
     <p id="modalRecuperarSinMail" class="auth-modal-mail-warning" style="display:none;" role="status"></p>
     <p id="modalRecuperarError" class="auth-form-error" role="alert"></p>
-    <div class="auth-field-group">
-      <label for="recuperarEmail">Correo electrónico</label>
-      <input id="recuperarEmail" type="email" autocomplete="email">
+    <p id="modalRecuperarNoExiste" class="auth-form-error" style="display:none;" role="status"></p>
+    <div id="modalRecuperarBloqueCorreo">
+      <div class="auth-field-group">
+        <label for="recuperarEmail">Correo electrónico</label>
+        <input id="recuperarEmail" type="email" autocomplete="email">
+      </div>
     </div>
-    <div id="modalRecuperarLinkWrap" class="auth-recuperar-link-wrap" style="display:none;">
-      <p class="auth-field-help">Abre este enlace en el navegador o cópialo:</p>
-      <div class="auth-recuperar-url-box" id="modalRecuperarUrlText"></div>
-      <button type="button" class="btn-primary auth-submit" id="btnCopiarEnlaceRecuperar">Copiar enlace</button>
+    <div id="modalRecuperarBloqueExiste" style="display:none;">
+      <p class="auth-hint" id="modalRecuperarHintExiste">Correo registrado. Continúa para restablecer la contraseña.</p>
+      <div class="auth-modal-acciones auth-modal-acciones--stack">
+        <button type="button" class="btn-primary" id="btnModalConfirmarCorreoPrimero" style="display:none;">Confirmar correo</button>
+        <button type="button" class="btn-primary" id="btnModalActualizarPass" style="display:none;">Actualizar contraseña</button>
+        <button type="button" class="auth-link-btn" id="btnModalRecuperarOtraCuenta">Usar otro correo</button>
+      </div>
     </div>
-    <div class="auth-modal-acciones">
-      <button type="button" class="btn-primary" id="btnEnviarRecuperar">Enviar enlace</button>
+    <div id="modalRecuperarBloqueNuevaPass" class="auth-form auth-form--stacked" style="display:none;">
+      <div class="auth-field-group">
+        <label for="modalRecuperarPass1">Nueva contraseña</label>
+        <input id="modalRecuperarPass1" type="password" autocomplete="new-password" minlength="6" required>
+      </div>
+      <div class="auth-field-group">
+        <label for="modalRecuperarPass2">Confirmar contraseña</label>
+        <input id="modalRecuperarPass2" type="password" autocomplete="new-password" minlength="6" required>
+      </div>
+      <p id="modalRecuperarPassError" class="auth-form-error" role="alert"></p>
+      <div class="auth-modal-acciones">
+        <button type="button" class="btn-primary" id="btnModalGuardarNuevaPass">Guardar contraseña</button>
+        <button type="button" class="auth-link-btn" id="btnModalCancelarNuevaPass">Cancelar</button>
+      </div>
+    </div>
+    <div class="auth-modal-acciones" id="modalRecuperarAccionesInicial">
+      <button type="button" class="btn-primary" id="btnComprobarCorreoRecuperar">Comprobar correo</button>
       <button type="button" class="modal-no-entregado-close" id="btnCerrarModalRecuperar">Cerrar</button>
     </div>
   </div>
