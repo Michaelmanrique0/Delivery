@@ -276,17 +276,11 @@
   </div>
 
   <section id="pageUsuariosRoles" class="page-usuarios-roles" style="display:none;" aria-hidden="true">
-    <div class="page-usuarios-roles-topbar">
-      <button type="button" class="btn-info page-usuarios-roles-volver" onclick="cerrarPaginaUsuariosRoles()">
-        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Volver a pedidos
-      </button>
-    </div>
     <h2 class="page-usuarios-roles-titulo"><i class="fa-solid fa-users" aria-hidden="true"></i> Usuarios y roles</h2>
     <p class="modal-usuarios-ayuda page-usuarios-roles-intro">Crea mensajeros u otros administradores y cambia roles cuando lo necesites.</p>
     <div id="usuariosRolesLista" class="modal-usuarios-lista page-usuarios-lista"></div>
 
-    <h3 class="page-usuarios-asignaciones-titulo"><i class="fa-solid fa-motorcycle" aria-hidden="true"></i> Pedidos y pagos por mensajero</h3>
-    <p class="page-usuarios-asignaciones-ayuda">En cada tarjeta: pedidos asignados ahora mismo y debajo los mismos totales que ve el mensajero (recogido del día, pago domiciliario $12.000 por envío, a entregar a tienda, Nequi y Daviplata). Usa <strong>Actualizar asignaciones</strong> si cambiaste pedidos en otro dispositivo.</p>
+    <h3 class="page-usuarios-asignaciones-titulo"><i class="fa-solid fa-motorcycle" aria-hidden="true"></i> Pedidos asignados por mensajero</h3>
     <div class="page-usuarios-asignaciones-toolbar">
       <button type="button" class="btn-info" onclick="void actualizarPanelAsignacionesMensajerosDesdeApi()">Actualizar asignaciones</button>
     </div>
@@ -312,6 +306,6 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="app.js?v=20260419pedidosPagosUnidos"></script>
+<script src="app.js?v=20260419usuariosrolesSinVolver"></script>
 </body>
 </html>

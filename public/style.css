@@ -2227,16 +2227,6 @@ button i,
   margin: 0 auto;
 }
 
-.page-usuarios-roles-topbar {
-  margin-bottom: 16px;
-}
-
-.page-usuarios-roles-volver {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .page-usuarios-roles-titulo {
   margin: 0 0 8px;
   font-size: 1.35rem;
