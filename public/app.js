@@ -1980,6 +1980,24 @@ function moverPedidoPorId(draggedId, targetId) {
   return true;
 }
 
+function advertirSiAdminReordenaAsignados(idsPedidos) {
+  if (!esSesionAdmin()) return true;
+  const uids = new Set();
+  for (const pid of idsPedidos) {
+    const p = pedidos.find((x) => Number(x.id) === Number(pid));
+    const a = String(p?.assignedTo || '').trim();
+    if (a) uids.add(a);
+  }
+  if (uids.size === 0) return true;
+  const nombres = [...uids]
+    .map((uid) => {
+      const m = (listaMensajerosCache || []).find((x) => String(x.id) === String(uid));
+      return m ? String(m.username || uid) : String(uid);
+    })
+    .join(', ');
+  return window.confirm(`Estos pedidos ya fueron asignados a ${nombres}. ¿Deseas modificar el orden?`);
+}
+
 /** Inserta el pedido inmediatamente antes de `beforeId` (tras quitar el arrastrado del array). */
 function moverPedidoAntesDeId(draggedId, beforeId) {
   if (Number(draggedId) === Number(beforeId)) return false;
@@ -2146,13 +2164,17 @@ function ordenItemPointerEnd(e) {
     const after = ph.nextElementSibling;
     if (after && after.classList && after.classList.contains('orden-item')) {
       const beforeId = parseInt(after.dataset.id, 10);
-      if (Number.isFinite(beforeId)) ok = moverPedidoAntesDeId(pedidoId, beforeId);
+      if (Number.isFinite(beforeId) && advertirSiAdminReordenaAsignados([pedidoId, beforeId])) {
+        ok = moverPedidoAntesDeId(pedidoId, beforeId);
+      }
     } else {
       const items = [...lista.querySelectorAll('.orden-item:not(.dragging)')];
       const last = items[items.length - 1];
       if (last) {
         const afterId = parseInt(last.dataset.id, 10);
-        if (Number.isFinite(afterId)) ok = moverPedidoDespuesDeId(pedidoId, afterId);
+        if (Number.isFinite(afterId) && advertirSiAdminReordenaAsignados([pedidoId, afterId])) {
+          ok = moverPedidoDespuesDeId(pedidoId, afterId);
+        }
       }
     }
   } else {
@@ -2164,6 +2186,9 @@ function ordenItemPointerEnd(e) {
     guardarPedidos();
     renderPedidos();
     redibujarRutaDebounced(120);
+    if (esSesionAdmin()) {
+      void notificarMensajerosOrdenActualizado();
+    }
   }
 }
 
@@ -2244,10 +2269,18 @@ function handleDrop(e) {
   if (!draggedElement || draggedElement === this) return false;
   const draggedId = parseInt(draggedElement.dataset.id, 10);
   const targetId = parseInt(this.dataset.id, 10);
-  if (Number.isFinite(draggedId) && Number.isFinite(targetId) && moverPedidoPorId(draggedId, targetId)) {
+  if (
+    Number.isFinite(draggedId) &&
+    Number.isFinite(targetId) &&
+    advertirSiAdminReordenaAsignados([draggedId, targetId]) &&
+    moverPedidoPorId(draggedId, targetId)
+  ) {
     guardarPedidos();
     renderPedidos();
     actualizarMarcadores();
+    if (esSesionAdmin()) {
+      void notificarMensajerosOrdenActualizado();
+    }
   }
   return false;
 }

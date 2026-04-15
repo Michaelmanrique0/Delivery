@@ -808,6 +808,28 @@ app.patch(
       p.assignedTo = String(uid);
     }
     await upsertOrderRow(orderId, p);
+
+    // Al asignar a un mensajero, copiar el orden actual del admin a su ruta.
+    if (assignUserId !== null && assignUserId !== '' && assignUserId !== undefined) {
+      const uid = Number(assignUserId);
+      let orderIndex = [];
+      try {
+        orderIndex = JSON.parse((await getMeta('order_index')) || '[]');
+      } catch (_e) {
+        orderIndex = [];
+      }
+      if (!Array.isArray(orderIndex)) orderIndex = [];
+      const rows2 = await getAllOrdersRows();
+      const mineIds = new Set();
+      for (const row2 of rows2) {
+        if (row2.id == null) continue;
+        const pp = parsePayloadRow(row2);
+        if (!pp) continue;
+        if (String(pp.assignedTo || '') === String(uid)) mineIds.add(Number(pp.id));
+      }
+      const route = orderIndex.map((x) => Number(x)).filter((x) => Number.isFinite(x) && mineIds.has(x));
+      await setMeta(`route_u${uid}`, JSON.stringify(route));
+    }
     res.json({ order: p });
   })
 );
@@ -849,6 +871,26 @@ app.post(
       p.assignedTo = String(uid);
       await upsertOrderRow(id, p);
     }
+
+    // Copiar el orden del admin a la ruta del mensajero (incluyendo los recién asignados).
+    let orderIndex = [];
+    try {
+      orderIndex = JSON.parse((await getMeta('order_index')) || '[]');
+    } catch (_e) {
+      orderIndex = [];
+    }
+    if (!Array.isArray(orderIndex)) orderIndex = [];
+    const rows2 = await getAllOrdersRows();
+    const mineIds = new Set();
+    for (const row2 of rows2) {
+      if (row2.id == null) continue;
+      const pp = parsePayloadRow(row2);
+      if (!pp) continue;
+      if (String(pp.assignedTo || '') === String(uid)) mineIds.add(Number(pp.id));
+    }
+    const route = orderIndex.map((x) => Number(x)).filter((x) => Number.isFinite(x) && mineIds.has(x));
+    await setMeta(`route_u${uid}`, JSON.stringify(route));
+
     res.json({ ok: true, assignedTo: String(uid), count: orderIds.length });
   })
 );
