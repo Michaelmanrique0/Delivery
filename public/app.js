@@ -373,9 +373,14 @@ function cargarConfigNotificacionPago() {
       }
       return predeterminado;
     };
+    const tieneDaviplata = boolSeguro(guardado.tieneDaviplata, true);
+    const tieneNequi =
+      typeof guardado.tieneNequi === 'undefined'
+        ? tieneDaviplata
+        : boolSeguro(guardado.tieneNequi, CONFIG_NOTIFICACION_DEFAULT.tieneNequi);
     return {
-      tieneNequi: boolSeguro(guardado.tieneNequi, true),
-      tieneDaviplata: boolSeguro(guardado.tieneDaviplata, true),
+      tieneNequi,
+      tieneDaviplata,
       numeroDigital: String(guardado.numeroDigital || numeroLegacy || CONFIG_NOTIFICACION_DEFAULT.numeroDigital),
       tieneLlave: boolSeguro(guardado.tieneLlave, true),
       llavePago: String(guardado.llavePago || CONFIG_NOTIFICACION_DEFAULT.llavePago)
@@ -444,7 +449,10 @@ function actualizarVisibilidadConfigNotificacion() {
   const tieneNequi = document.getElementById('cfgTieneNequi');
   const tieneDaviplata = document.getElementById('cfgTieneDaviplata');
   const tieneLlave = document.getElementById('cfgTieneLlave');
-  const mostrarNumeroDigital = !!(tieneNequi && tieneDaviplata && (tieneNequi.checked || tieneDaviplata.checked));
+  const mostrarNumeroDigital = !!(
+    (tieneNequi && tieneNequi.checked) ||
+    (tieneDaviplata && tieneDaviplata.checked)
+  );
   if (numeroDigitalWrap) numeroDigitalWrap.style.display = mostrarNumeroDigital ? 'block' : 'none';
   if (llaveWrap && tieneLlave) llaveWrap.style.display = tieneLlave.checked ? 'block' : 'none';
 }
@@ -1327,12 +1335,16 @@ function calcularTotalesEntregaPedidos(arr) {
   const totalPagadoDaviplata = lista
     .filter((p) => p.entregado && !p.noEntregado)
     .reduce((sum, p) => sum + Number(p.montoDaviplata || 0), 0);
+  const totalPagadoEfectivo = lista
+    .filter((p) => p.entregado && !p.noEntregado)
+    .reduce((sum, p) => sum + Number(p.montoEfectivo || 0), 0);
   const hayDatos =
     totalDelDia > 0 ||
     recogidoDelDia > 0 ||
     pagoDomiciliario > 0 ||
     totalPagadoNequi > 0 ||
-    totalPagadoDaviplata > 0;
+    totalPagadoDaviplata > 0 ||
+    totalPagadoEfectivo > 0;
   return {
     totalDelDia,
     recogidoDelDia,
@@ -1340,25 +1352,39 @@ function calcularTotalesEntregaPedidos(arr) {
     entregarTienda,
     totalPagadoNequi,
     totalPagadoDaviplata,
+    totalPagadoEfectivo,
     hayDatos,
   };
 }
 
-function htmlBloqueTotalesResumen(totales) {
-  const showNequi = totales.totalPagadoNequi > 0 ? 'inline-flex' : 'none';
+function htmlBloqueTotalesResumen(totales, opts = {}) {
+  const ocultarNequi = !!(opts && opts.ocultarNequi);
+  const ocultarTotalDelDia = !!(opts && opts.ocultarTotalDelDia);
+  const showNequi = !ocultarNequi && totales.totalPagadoNequi > 0 ? 'inline-flex' : 'none';
   const showDav = totales.totalPagadoDaviplata > 0 ? 'inline-flex' : 'none';
+  const showEfectivo = totales.totalPagadoEfectivo > 0 ? 'inline-flex' : 'none';
+  const showPagoDomiciliario = totales.pagoDomiciliario > 0 ? 'inline-flex' : 'none';
   const fmt = (x) => Number(x).toLocaleString('es-CO');
+  const bloqueTotalDelDia = ocultarTotalDelDia
+    ? ''
+    : `<div class="total-item total-total-dia">` +
+      `<span class="total-icon icon-total-dia"><i class="fa-solid fa-sack-dollar"></i></span>` +
+      `Total a recoger (día): $${fmt(totales.totalDelDia)}` +
+      `</div>`;
+  const bloqueNequi = ocultarNequi
+    ? ''
+    : `<div class="total-item total-nequi" style="display:${showNequi}">` +
+      `<span class="total-icon icon-nequi"><i class="fa-solid fa-mobile-screen-button"></i></span>` +
+      `Pagado por Nequi: $${fmt(totales.totalPagadoNequi)}` +
+      `</div>`;
   return (
     `<div class="totales-resumen">` +
-    `<div class="total-item total-total-dia">` +
-    `<span class="total-icon icon-total-dia"><i class="fa-solid fa-sack-dollar"></i></span>` +
-    `Total a recoger (día): $${fmt(totales.totalDelDia)}` +
-    `</div>` +
+    bloqueTotalDelDia +
     `<div class="total-item total-recogido-dia">` +
     `<span class="total-icon icon-recogido-dia"><i class="fa-solid fa-sack-dollar"></i></span>` +
     `Total: $${fmt(totales.recogidoDelDia)}` +
     `</div>` +
-    `<div class="total-item total-pago-domiciliario">` +
+    `<div class="total-item total-pago-domiciliario" style="display:${showPagoDomiciliario}">` +
     `<span class="total-icon icon-pago-domiciliario"><i class="fa-solid fa-motorcycle"></i></span>` +
     `Pago domiciliario: $${fmt(totales.pagoDomiciliario)}` +
     `</div>` +
@@ -1366,13 +1392,14 @@ function htmlBloqueTotalesResumen(totales) {
     `<span class="total-icon icon-entregar-tienda"><i class="fa-solid fa-store"></i></span>` +
     `A entregar a tienda: $${fmt(totales.entregarTienda)}` +
     `</div>` +
-    `<div class="total-item total-nequi" style="display:${showNequi}">` +
-    `<span class="total-icon icon-nequi"><i class="fa-solid fa-mobile-screen-button"></i></span>` +
-    `Pagado por Nequi: $${fmt(totales.totalPagadoNequi)}` +
-    `</div>` +
+    bloqueNequi +
     `<div class="total-item total-daviplata" style="display:${showDav}">` +
     `<span class="total-icon icon-daviplata"><i class="fa-solid fa-wallet"></i></span>` +
     `Pagado por Daviplata: $${fmt(totales.totalPagadoDaviplata)}` +
+    `</div>` +
+    `<div class="total-item total-efectivo" style="display:${showEfectivo}">` +
+    `<span class="total-icon icon-efectivo"><i class="fa-solid fa-money-bill-wave"></i></span>` +
+    `Recogido en efectivo: $${fmt(totales.totalPagadoEfectivo)}` +
     `</div>` +
     `</div>`
   );
@@ -1552,8 +1579,11 @@ function renderPedidos() {
     const elEntregarTienda = document.getElementById('totalEntregarTienda');
     const elPagadoNequi = document.getElementById('totalPagadoNequi');
     const elPagadoDaviplata = document.getElementById('totalPagadoDaviplata');
+    const elPagadoEfectivo = document.getElementById('totalPagadoEfectivo');
     const itemNequi = elPagadoNequi ? elPagadoNequi.closest('.total-item') : null;
     const itemDaviplata = elPagadoDaviplata ? elPagadoDaviplata.closest('.total-item') : null;
+    const itemEfectivo = elPagadoEfectivo ? elPagadoEfectivo.closest('.total-item') : null;
+    const itemPagoDomiciliario = elPagoDomiciliario ? elPagoDomiciliario.closest('.total-item') : null;
 
     if (elTotalDelDia) elTotalDelDia.textContent = totales.totalDelDia.toLocaleString('es-CO');
     if (elRecogidoDia) elRecogidoDia.textContent = totales.recogidoDelDia.toLocaleString('es-CO');
@@ -1561,8 +1591,15 @@ function renderPedidos() {
     if (elEntregarTienda) elEntregarTienda.textContent = totales.entregarTienda.toLocaleString('es-CO');
     if (elPagadoNequi) elPagadoNequi.textContent = totales.totalPagadoNequi.toLocaleString('es-CO');
     if (elPagadoDaviplata) elPagadoDaviplata.textContent = totales.totalPagadoDaviplata.toLocaleString('es-CO');
-    if (itemNequi) itemNequi.style.display = totales.totalPagadoNequi > 0 ? 'inline-flex' : 'none';
-    if (itemDaviplata) itemDaviplata.style.display = totales.totalPagadoDaviplata > 0 ? 'inline-flex' : 'none';
+    if (elPagadoEfectivo) elPagadoEfectivo.textContent = totales.totalPagadoEfectivo.toLocaleString('es-CO');
+    if (itemNequi)
+      itemNequi.style.display =
+        esSesionAdmin() ? 'none' : totales.totalPagadoNequi > 0 ? 'inline-flex' : 'none';
+    if (itemDaviplata)
+      itemDaviplata.style.display = totales.totalPagadoDaviplata > 0 ? 'inline-flex' : 'none';
+    if (itemEfectivo) itemEfectivo.style.display = totales.totalPagadoEfectivo > 0 ? 'inline-flex' : 'none';
+    if (itemPagoDomiciliario)
+      itemPagoDomiciliario.style.display = totales.pagoDomiciliario > 0 ? 'inline-flex' : 'none';
     elResumen.style.display = totales.hayDatos ? 'flex' : 'none';
   }
 
@@ -3106,6 +3143,12 @@ function asegurarModalPagoEntregado() {
   let modal = document.getElementById('modalPagoEntregado');
   if (modal) return modal;
 
+  const ocultarNequi = esSesionAdmin();
+  const btnNequi = ocultarNequi ? '' : `<button class="btn-success" onclick="seleccionarMetodoPagoEntregado('nequi')">Nequi</button>`;
+  const btnNequiMixto = ocultarNequi
+    ? ''
+    : `<button class="btn-success" onclick="seleccionarMetodoPagoEntregado('nequi_efectivo')">Nequi + Efectivo</button>`;
+
   modal = document.createElement('div');
   modal.id = 'modalPagoEntregado';
   modal.className = 'modal-no-entregado-backdrop';
@@ -3114,10 +3157,10 @@ function asegurarModalPagoEntregado() {
       <h3>Foto evidencia entregado</h3>
       <p>Selecciona el método de pago del pedido:</p>
       <div class="modal-no-entregado-actions">
-        <button class="btn-success" onclick="seleccionarMetodoPagoEntregado('nequi')">Nequi</button>
+        ${btnNequi}
         <button class="btn-info" onclick="seleccionarMetodoPagoEntregado('efectivo')">Efectivo</button>
         <button class="btn-route" onclick="seleccionarMetodoPagoEntregado('daviplata')">Daviplata</button>
-        <button class="btn-success" onclick="seleccionarMetodoPagoEntregado('nequi_efectivo')">Nequi + Efectivo</button>
+        ${btnNequiMixto}
         <button class="btn-route" onclick="seleccionarMetodoPagoEntregado('daviplata_efectivo')">Daviplata + Efectivo</button>
         <button class="btn-warning" onclick="seleccionarMetodoPagoEntregado('pagado_tienda')">Ya se pagó a la tienda</button>
         <button class="btn-info" onclick="seleccionarMetodoPagoEntregado('es_cambio')">Es un cambio</button>
@@ -5531,7 +5574,7 @@ function htmlCardPedidosYPagosMensajero(titulo, asignados) {
     `<article class="usuarios-roles-mensajero-card">` +
     `<h4 class="usuarios-roles-mensajero-nombre">${escapeHtmlTexto(titulo)}</h4>` +
     htmlPedidosAsignadosLista(asignados) +
-    `<div class="usuarios-roles-mensajero-pagos">${htmlBloqueTotalesResumen(totales)}</div>` +
+    `<div class="usuarios-roles-mensajero-pagos">${htmlBloqueTotalesResumen(totales, { ocultarTotalDelDia: true })}</div>` +
     `</article>`
   );
 }

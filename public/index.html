@@ -173,7 +173,7 @@
   <div id="modalConfigNotificacion" class="modal-no-entregado-backdrop">
     <div class="modal-no-entregado-card configuracion-notificacion-panel">
       <h3>Medios de pago en la notificación al cliente</h3>
-      <p class="config-notificacion-ayuda">Estos datos se incluyen en el mensaje de WhatsApp cuando notificas al cliente (Nequi, Daviplata, Bre-B).</p>
+      <p class="config-notificacion-ayuda">Estos datos se incluyen en el mensaje de WhatsApp cuando notificas al cliente (Nequi, Daviplata, Bre-B). Solo aparecen en el mensaje los medios que marques.</p>
       <div class="configuracion-notificacion-body">
         <div class="config-check-row">
           <label class="config-check">
@@ -234,6 +234,10 @@
         <span class="total-icon icon-total-dia"><i class="fa-solid fa-sack-dollar"></i></span>
         Total a recoger (día): $<span id="totalDelDia">0</span>
       </div>
+      <div class="total-item total-pago-domiciliario">
+        <span class="total-icon icon-pago-domiciliario"><i class="fa-solid fa-motorcycle"></i></span>
+        Pago a domiciliario: $<span id="totalPagoDomiciliario">0</span>
+      </div>
       <div class="total-item total-nequi">
         <span class="total-icon icon-nequi"><i class="fa-solid fa-mobile-screen-button"></i></span>
         Pagado por Nequi: $<span id="totalPagadoNequi">0</span>
@@ -241,6 +245,10 @@
       <div class="total-item total-daviplata">
         <span class="total-icon icon-daviplata"><i class="fa-solid fa-wallet"></i></span>
         Pagado por Daviplata: $<span id="totalPagadoDaviplata">0</span>
+      </div>
+      <div class="total-item total-efectivo">
+        <span class="total-icon icon-efectivo"><i class="fa-solid fa-money-bill-wave"></i></span>
+        Recogido en efectivo: $<span id="totalPagadoEfectivo">0</span>
       </div>
     </div>
     <div class="pedidos-tabs" id="pedidosTabs">
@@ -310,6 +318,6 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="app.js?v=20260419usuariosrolesSinVolver"></script>
+<script src="app.js?v=20260415mediosPagoNotifNequi"></script>
 </body>
 </html>
