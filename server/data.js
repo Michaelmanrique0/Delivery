@@ -1,7 +1,7 @@
 /**
  * Persistencia en Supabase (PostgreSQL).
  * Requiere: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (solo servidor; nunca en el cliente).
- * Verificación de correo y tokens: supabase/migrations/002_email_verify_and_tokens.sql
+ * Tokens de recuperación de contraseña: supabase/migrations/002_email_verify_and_tokens.sql
  */
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
@@ -31,7 +31,6 @@ const T = {
 };
 
 const TOKEN_KIND = {
-  VERIFY_EMAIL: 'verify_email',
   PASSWORD_RESET: 'password_reset',
 };
 
@@ -98,19 +97,15 @@ async function getUserById(id) {
   return mapUserPublic(data);
 }
 
-/**
- * @param {object} opts
- * @param {boolean} [opts.emailVerified] Si true, marca el correo como verificado al crear.
- */
-async function createUser(username, email, passwordHash, role, opts = {}) {
-  const emailVerified = !!opts.emailVerified;
+async function createUser(username, email, passwordHash, role) {
+  const em = email != null && String(email).trim() !== '' ? normalizeEmail(email) : null;
   const row = {
     username: String(username).trim(),
-    email: email != null && String(email).trim() !== '' ? normalizeEmail(email) : null,
+    email: em,
     password_hash: passwordHash,
     role,
     created_at: Math.floor(Date.now() / 1000),
-    email_verified_at: emailVerified ? Math.floor(Date.now() / 1000) : null,
+    email_verified_at: em ? Math.floor(Date.now() / 1000) : null,
   };
   const { data, error } = await supabase.from(T.users).insert(row).select('id, username, email, role, created_at').single();
   if (error) throw error;
@@ -136,13 +131,7 @@ async function updateUserEmail(id, email) {
   return true;
 }
 
-async function setUserEmailVerified(userId) {
-  const ts = Math.floor(Date.now() / 1000);
-  const { error } = await supabase.from(T.users).update({ email_verified_at: ts }).eq('id', userId);
-  if (error) throw error;
-}
-
-/** Solo para revertir un registro si falla el envío del correo. */
+/** Borrado de usuario (p. ej. desde el panel admin). */
 async function deleteUserById(userId) {
   const { error } = await supabase.from(T.users).delete().eq('id', userId);
   if (error) throw error;
@@ -174,13 +163,6 @@ async function insertEmailToken(userId, kind, expiresMs) {
   return token;
 }
 
-/** Token válido 48 h para confirmar correo. */
-async function createVerifyEmailToken(userId) {
-  await deleteTokensForUserKind(userId, TOKEN_KIND.VERIFY_EMAIL);
-  const expiresMs = Date.now() + 48 * 60 * 60 * 1000;
-  return insertEmailToken(userId, TOKEN_KIND.VERIFY_EMAIL, expiresMs);
-}
-
 /** Token válido 1 h para restablecer contraseña. */
 async function createPasswordResetToken(userId) {
   await deleteTokensForUserKind(userId, TOKEN_KIND.PASSWORD_RESET);
@@ -203,10 +185,6 @@ async function consumeEmailToken(token, kind) {
   const { error: delErr } = await supabase.from(T.emailTokens).delete().eq('token', t);
   if (delErr) throw delErr;
   return Number(row.user_id);
-}
-
-async function consumeVerifyEmailToken(token) {
-  return consumeEmailToken(token, TOKEN_KIND.VERIFY_EMAIL);
 }
 
 async function consumePasswordResetToken(token) {
@@ -278,15 +256,12 @@ module.exports = {
   updateUserRole,
   updateUserPasswordHash,
   updateUserEmail,
-  setUserEmailVerified,
   deleteUserById,
   listUsers,
   getAllOrdersRows,
   upsertOrderRow,
   deleteOrderRow,
   replaceAllOrders,
-  createVerifyEmailToken,
   createPasswordResetToken,
-  consumeVerifyEmailToken,
   consumePasswordResetToken,
 };

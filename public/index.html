@@ -63,23 +63,6 @@
         <button type="submit" id="regSubmitBtn" class="btn-primary auth-submit">Crear cuenta</button>
       </form>
     </div>
-    <div id="authBloquePostRegistro" class="auth-bloque-reset" style="display:none;">
-      <h2 class="auth-subtitulo">Confirma tu correo</h2>
-      <p id="authPostRegText" class="auth-hint"></p>
-      <div id="authPostRegLinkWrap" class="auth-recuperar-link-wrap" style="display:none;">
-        <p class="auth-field-help">En este modo no se envía correo. Abre o copia este enlace para confirmar tu cuenta:</p>
-        <div class="auth-recuperar-url-box" id="authPostRegUrlText"></div>
-        <button type="button" class="btn-primary auth-submit" id="btnCopiarEnlaceVerificacion">Copiar enlace</button>
-      </div>
-      <div class="auth-form auth-form--stacked">
-        <div class="auth-field-group">
-          <label for="authPendingEmail">Correo (puedes corregirlo si hubo un error)</label>
-          <input id="authPendingEmail" type="email" autocomplete="email">
-        </div>
-        <button type="button" id="btnAuthReenviarVerificacion" class="btn-primary auth-submit">Reenviar correo de confirmación</button>
-        <button type="button" id="btnAuthPostRegVolverLogin" class="auth-link-btn">Volver al inicio de sesión</button>
-      </div>
-    </div>
     <div id="authBloqueReset" class="auth-bloque-reset" style="display:none;">
       <h2 class="auth-subtitulo">Nueva contraseña</h2>
       <p class="auth-hint">Elige una contraseña nueva para tu cuenta.</p>
@@ -122,7 +105,6 @@
     <div id="modalRecuperarBloqueExiste" style="display:none;">
       <p class="auth-hint" id="modalRecuperarHintExiste">Correo registrado. Continúa para restablecer la contraseña.</p>
       <div class="auth-modal-acciones auth-modal-acciones--stack">
-        <button type="button" class="btn-primary" id="btnModalConfirmarCorreoPrimero" style="display:none;">Confirmar correo</button>
         <button type="button" class="btn-primary" id="btnModalActualizarPass" style="display:none;">Actualizar contraseña</button>
         <button type="button" class="auth-link-btn" id="btnModalRecuperarOtraCuenta">Usar otro correo</button>
       </div>

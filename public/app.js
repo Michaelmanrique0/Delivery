@@ -4910,8 +4910,6 @@ function cargarPedidosDesdeLocalStorage() {
 }
 
 let authHayUsuarios = false;
-/** True si el servidor usa AUTH_LINKS_IN_RESPONSE (enlaces en pantalla, sin correo). */
-let authEnlacesSinCorreo = false;
 
 async function iniciarApp() {
   if (!sesionUsuario) return;
@@ -5004,51 +5002,7 @@ async function entrarAppConSesion(user) {
   await iniciarApp();
 }
 
-function ocultarBloqueCorreoPendiente() {
-  const principal = document.getElementById('authBloquePrincipal');
-  const post = document.getElementById('authBloquePostRegistro');
-  const wrap = document.getElementById('authPostRegLinkWrap');
-  const urlBox = document.getElementById('authPostRegUrlText');
-  window.__pendingVerifyEmail = '';
-  window.__pendingVerifyUrl = '';
-  if (wrap) wrap.style.display = 'none';
-  if (urlBox) urlBox.textContent = '';
-  if (post) post.style.display = 'none';
-  if (principal) principal.style.display = 'block';
-}
-
-function mostrarBloqueCorreoPendiente(email, mensaje, verifyUrl) {
-  const principal = document.getElementById('authBloquePrincipal');
-  const post = document.getElementById('authBloquePostRegistro');
-  const txt = document.getElementById('authPostRegText');
-  const inp = document.getElementById('authPendingEmail');
-  const errG = document.getElementById('authErrorGlobal');
-  const errF = document.getElementById('authFormError');
-  const wrap = document.getElementById('authPostRegLinkWrap');
-  const urlBox = document.getElementById('authPostRegUrlText');
-  if (errF) errF.textContent = '';
-  window.__pendingVerifyEmail = String(email || '').trim();
-  window.__pendingVerifyUrl = String(verifyUrl || '').trim();
-  if (txt) txt.textContent = mensaje || '';
-  if (inp) inp.value = window.__pendingVerifyEmail;
-  if (errG) errG.textContent = '';
-  if (wrap && urlBox) {
-    if (window.__pendingVerifyUrl) {
-      wrap.style.display = 'block';
-      urlBox.textContent = window.__pendingVerifyUrl;
-    } else {
-      wrap.style.display = 'none';
-      urlBox.textContent = '';
-    }
-  }
-  const blkReset = document.getElementById('authBloqueReset');
-  if (blkReset) blkReset.style.display = 'none';
-  if (principal) principal.style.display = 'none';
-  if (post) post.style.display = 'block';
-}
-
 function switchAuthTab(which) {
-  ocultarBloqueCorreoPendiente();
   const tabLogin = document.getElementById('authTabLogin');
   const tabReg = document.getElementById('authTabRegistro');
   const formLogin = document.getElementById('formLogin');
@@ -5091,13 +5045,6 @@ async function onSubmitLogin(ev) {
     await entrarAppConSesion(data.user);
   } catch (e) {
     if (err) err.textContent = String(e.message || e);
-    if (e.code === 'EMAIL_NOT_VERIFIED') {
-      const emailGuess = correoPareceValido(login) ? login : '';
-      mostrarBloqueCorreoPendiente(
-        emailGuess,
-        'Tu cuenta existe, pero el correo aún no está confirmado. Revisa tu bandeja (y spam) o reenvía el enlace.'
-      );
-    }
   }
 }
 
@@ -5121,17 +5068,6 @@ async function onSubmitRegistro(ev) {
       method: 'POST',
       body: JSON.stringify({ username: u, email, password: p }),
     });
-    if (data.needsEmailVerification) {
-      authHayUsuarios = true;
-      actualizarTextosRegistroAuth();
-      mostrarBloqueCorreoPendiente(
-        email,
-        data.message ||
-          'Te enviamos un correo con un enlace para confirmar tu cuenta. Cuando lo abras, podrás iniciar sesión.',
-        data.verifyUrl || ''
-      );
-      return;
-    }
     setAuthToken(data.token);
     authHayUsuarios = true;
     await entrarAppConSesion(data.user);
@@ -5155,7 +5091,6 @@ function actualizarTextosRegistroAuth() {
 
 /** Token temporal para POST /api/auth/reset-password desde el modal de recuperación. */
 let modalRecuperarResetToken = '';
-let modalRecuperarVerifyToken = '';
 let modalRecuperarEmailComprobado = '';
 
 function resetUiModalRecuperarClave() {
@@ -5166,7 +5101,6 @@ function resetUiModalRecuperarClave() {
   const bloqueCorreo = document.getElementById('modalRecuperarBloqueCorreo');
   const accIni = document.getElementById('modalRecuperarAccionesInicial');
   const btnComprobar = document.getElementById('btnComprobarCorreoRecuperar');
-  const btnConf = document.getElementById('btnModalConfirmarCorreoPrimero');
   const btnAct = document.getElementById('btnModalActualizarPass');
   const hint = document.getElementById('modalRecuperarHintExiste');
   const p1 = document.getElementById('modalRecuperarPass1');
@@ -5182,14 +5116,12 @@ function resetUiModalRecuperarClave() {
   if (bloqueCorreo) bloqueCorreo.style.display = 'block';
   if (accIni) accIni.style.display = 'flex';
   if (btnComprobar) btnComprobar.style.display = '';
-  if (btnConf) btnConf.style.display = 'none';
   if (btnAct) btnAct.style.display = 'none';
   if (hint) hint.textContent = 'Correo registrado. Continúa para restablecer la contraseña.';
   if (p1) p1.value = '';
   if (p2) p2.value = '';
   if (errP) errP.textContent = '';
   modalRecuperarResetToken = '';
-  modalRecuperarVerifyToken = '';
   modalRecuperarEmailComprobado = '';
 }
 
@@ -5201,9 +5133,8 @@ function abrirModalRecuperarClave() {
   if (inp) inp.value = '';
   if (inp) inp.disabled = false;
   if (ayuda) {
-    ayuda.textContent = authEnlacesSinCorreo
-      ? 'Comprueba si tu correo está registrado. Si existe y aún no está verificado, primero confírmalo; luego podrás elegir una contraseña nueva aquí mismo.'
-      : 'Comprueba si tu correo está registrado. Si existe, te enviaremos un enlace para restablecer la contraseña o podrás continuar según la configuración del servidor.';
+    ayuda.textContent =
+      'Comprueba si tu correo está registrado. Si existe, podrás elegir una contraseña nueva aquí mismo (no se envía correo).';
   }
   if (modal) {
     modal.style.display = 'flex';
@@ -5231,7 +5162,6 @@ async function comprobarCorreoParaRecuperacion() {
   const noExiste = document.getElementById('modalRecuperarNoExiste');
   const bloqueExiste = document.getElementById('modalRecuperarBloqueExiste');
   const btnAct = document.getElementById('btnModalActualizarPass');
-  const btnConf = document.getElementById('btnModalConfirmarCorreoPrimero');
   const btnComprobar = document.getElementById('btnComprobarCorreoRecuperar');
   if (err) err.textContent = '';
   if (noExiste) {
@@ -5255,14 +5185,12 @@ async function comprobarCorreoParaRecuperacion() {
       }
       if (bloqueExiste) bloqueExiste.style.display = 'none';
       if (btnAct) btnAct.style.display = 'none';
-      if (btnConf) btnConf.style.display = 'none';
       return;
     }
     modalRecuperarEmailComprobado = email;
     if (inp) inp.disabled = true;
     if (btnComprobar) btnComprobar.style.display = 'none';
     if (bloqueExiste) bloqueExiste.style.display = 'block';
-    if (btnConf) btnConf.style.display = 'none';
     if (btnAct) btnAct.style.display = 'block';
   } catch (e) {
     if (err) err.textContent = String(e.message || e);
@@ -5274,7 +5202,6 @@ async function solicitarTokenRecuperacionDesdeModal() {
   const err = document.getElementById('modalRecuperarError');
   const hint = document.getElementById('modalRecuperarHintExiste');
   const btnAct = document.getElementById('btnModalActualizarPass');
-  const btnConf = document.getElementById('btnModalConfirmarCorreoPrimero');
   const bloquePass = document.getElementById('modalRecuperarBloqueNuevaPass');
   if (err) err.textContent = '';
   const email = modalRecuperarEmailComprobado || String(document.getElementById('recuperarEmail')?.value || '').trim();
@@ -5287,80 +5214,22 @@ async function solicitarTokenRecuperacionDesdeModal() {
       method: 'POST',
       body: JSON.stringify({ email }),
     });
-    if (!authEnlacesSinCorreo) {
-      mostrarToast(data.message || 'Revisa tu correo (y la carpeta de spam).', 'success', 9000);
-      cerrarModalRecuperarClave();
-      resetUiModalRecuperarClave();
-      return;
-    }
-    if (data.pendingEmailVerification && data.verifyToken) {
-      modalRecuperarVerifyToken = String(data.verifyToken);
-      modalRecuperarResetToken = '';
-      if (hint) hint.textContent = data.message || 'Confirma tu correo para poder elegir una contraseña nueva.';
-      if (btnAct) btnAct.style.display = 'none';
-      if (btnConf) btnConf.style.display = 'block';
-      mostrarToast('Confirma tu correo con el botón de abajo.', 'success', 8000);
-      return;
-    }
     const token = String(data.resetToken || '').trim();
     if (token) {
       modalRecuperarResetToken = token;
-      modalRecuperarVerifyToken = '';
       if (bloquePass) bloquePass.style.display = 'block';
       if (btnAct) btnAct.style.display = 'none';
-      if (btnConf) btnConf.style.display = 'none';
       const bloqueExiste = document.getElementById('modalRecuperarBloqueExiste');
       if (bloqueExiste) bloqueExiste.style.display = 'none';
       mostrarToast(data.message || 'Escribe tu nueva contraseña.', 'success', 6000);
       return;
     }
-    if (err) err.textContent = 'No se pudo obtener el enlace de recuperación. Revisa la configuración del servidor.';
+    if (err) err.textContent = 'No se pudo obtener el enlace de recuperación. Intenta de nuevo.';
   } catch (e) {
     const det = e.detail ? ` ${String(e.detail)}` : '';
     const texto = `${String(e.message || e)}${det}`.trim();
     if (err) err.textContent = texto;
     mostrarToast(texto, 'error', 10000);
-  }
-}
-
-async function confirmarCorreoDesdeModalRecuperar() {
-  const err = document.getElementById('modalRecuperarError');
-  const hint = document.getElementById('modalRecuperarHintExiste');
-  const btnConf = document.getElementById('btnModalConfirmarCorreoPrimero');
-  const btnAct = document.getElementById('btnModalActualizarPass');
-  const bloquePass = document.getElementById('modalRecuperarBloqueNuevaPass');
-  if (err) err.textContent = '';
-  const v = String(modalRecuperarVerifyToken || '').trim();
-  if (!v) {
-    if (err) err.textContent = 'Falta el token de verificación. Vuelve a intentar.';
-    return;
-  }
-  try {
-    await apiJson('/api/auth/verify-email', {
-      method: 'POST',
-      body: JSON.stringify({ token: v }),
-    });
-    modalRecuperarVerifyToken = '';
-    if (btnConf) btnConf.style.display = 'none';
-    mostrarToast('Correo confirmado. Ahora puedes elegir una contraseña nueva.', 'success', 8000);
-    const email = modalRecuperarEmailComprobado || String(document.getElementById('recuperarEmail')?.value || '').trim();
-    const data = await apiJson('/api/auth/forgot-password', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    });
-    const token = String(data.resetToken || '').trim();
-    if (token) {
-      modalRecuperarResetToken = token;
-      if (bloquePass) bloquePass.style.display = 'block';
-      if (hint) hint.textContent = 'Escribe y guarda tu nueva contraseña.';
-      const bloqueExiste = document.getElementById('modalRecuperarBloqueExiste');
-      if (bloqueExiste) bloqueExiste.style.display = 'none';
-      return;
-    }
-    if (err) err.textContent = 'No se pudo iniciar el cambio de contraseña. Intenta de nuevo.';
-  } catch (e) {
-    if (err) err.textContent = String(e.message || e);
-    mostrarToast(String(e.message || e), 'error', 9000);
   }
 }
 
@@ -5421,17 +5290,6 @@ function cancelarFormNuevaPassModalRecuperar() {
   if (p2) p2.value = '';
 }
 
-async function copiarEnlaceVerificacion() {
-  const u = String(window.__pendingVerifyUrl || '').trim();
-  if (!u) return;
-  try {
-    await navigator.clipboard.writeText(u);
-    mostrarToast('Enlace de confirmación copiado', 'success');
-  } catch (_e) {
-    mostrarToast('No se pudo copiar automáticamente; selecciona el texto del enlace.', 'warning');
-  }
-}
-
 function inicializarVistaResetDesdeUrl() {
   const p = new URLSearchParams(window.location.search);
   const t = p.get('reset');
@@ -5439,8 +5297,6 @@ function inicializarVistaResetDesdeUrl() {
   window.__passwordResetToken = decodeURIComponent(t);
   const main = document.getElementById('authBloquePrincipal');
   const blk = document.getElementById('authBloqueReset');
-  const post = document.getElementById('authBloquePostRegistro');
-  if (post) post.style.display = 'none';
   if (main) main.style.display = 'none';
   if (blk) blk.style.display = 'block';
   return true;
@@ -5457,57 +5313,6 @@ function cancelarVistaResetPassword() {
   try {
     history.replaceState({}, '', window.location.pathname || '/');
   } catch (_e) {}
-}
-
-async function reenviarCorreoVerificacionDesdeUi() {
-  const inp = document.getElementById('authPendingEmail');
-  const email = String(inp?.value || window.__pendingVerifyEmail || '').trim();
-  const errG = document.getElementById('authErrorGlobal');
-  if (!correoPareceValido(email)) {
-    if (errG) errG.textContent = 'Escribe un correo válido en el campo de arriba.';
-    return;
-  }
-  if (errG) errG.textContent = '';
-  try {
-    const data = await apiJson('/api/auth/resend-verification', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    });
-    const vUrl = String(data.verifyUrl || '').trim();
-    if (vUrl) {
-      window.__pendingVerifyUrl = vUrl;
-      const wrap = document.getElementById('authPostRegLinkWrap');
-      const urlBox = document.getElementById('authPostRegUrlText');
-      if (wrap) wrap.style.display = 'block';
-      if (urlBox) urlBox.textContent = vUrl;
-    }
-    mostrarToast(data.message || 'Listo.', 'success', 8000);
-  } catch (e) {
-    if (errG) errG.textContent = String(e.message || e);
-    if (e.detail) mostrarToast(String(e.detail), 'warning', 8000);
-  }
-}
-
-async function confirmarCorreoDesdeUrlSiAplica() {
-  const p = new URLSearchParams(window.location.search);
-  const v = p.get('verify');
-  if (!v) return false;
-  const errGlobal = document.getElementById('authErrorGlobal');
-  try {
-    const data = await apiJson('/api/auth/verify-email', {
-      method: 'POST',
-      body: JSON.stringify({ token: decodeURIComponent(v) }),
-    });
-    if (errGlobal) errGlobal.textContent = data.message || 'Correo confirmado.';
-    mostrarToast(data.message || 'Correo confirmado. Ya puedes iniciar sesión.', 'success');
-  } catch (e) {
-    if (errGlobal) errGlobal.textContent = String(e.message || e);
-    mostrarToast(String(e.message || e), 'error', 9000);
-  }
-  try {
-    history.replaceState({}, '', window.location.pathname || '/');
-  } catch (_e) {}
-  return true;
 }
 
 async function guardarNuevaContrasenaDesdeReset() {
@@ -5888,9 +5693,6 @@ async function iniciarFlujoAuth() {
   /* Con sesión guardada: validar antes de mostrar login (evita parpadeo al recargar). */
   if (token && !enVistaResetUrl) {
     try {
-      if (params.get('verify')) {
-        await confirmarCorreoDesdeUrlSiAplica();
-      }
       const me = await apiJson('/api/me', { method: 'GET' });
       await entrarAppConSesion(me.user);
       return;
@@ -5918,19 +5720,11 @@ async function iniciarFlujoAuth() {
   }
 
   authHayUsuarios = !!status.hasUsers;
-  authEnlacesSinCorreo = !!status.authLinksInResponse;
   actualizarTextosRegistroAuth();
-
-  const huboVerifyEnUrl = await confirmarCorreoDesdeUrlSiAplica();
-  if (huboVerifyEnUrl) {
-    switchAuthTab('login');
-  }
 
   const enVistaReset = inicializarVistaResetDesdeUrl();
   if (!enVistaReset) {
-    if (huboVerifyEnUrl) {
-      /* ya en pestaña login */
-    } else if (authHayUsuarios) {
+    if (authHayUsuarios) {
       let tabGuardada = null;
       try {
         tabGuardada = sessionStorage.getItem(AUTH_TAB_SESSION_KEY);
@@ -5965,9 +5759,6 @@ async function iniciarFlujoAuth() {
     document.getElementById('btnModalActualizarPass')?.addEventListener('click', () => {
       void solicitarTokenRecuperacionDesdeModal();
     });
-    document.getElementById('btnModalConfirmarCorreoPrimero')?.addEventListener('click', () => {
-      void confirmarCorreoDesdeModalRecuperar();
-    });
     document.getElementById('btnModalRecuperarOtraCuenta')?.addEventListener('click', () => {
       volverModalRecuperarAOtroCorreo();
     });
@@ -5977,20 +5768,10 @@ async function iniciarFlujoAuth() {
     document.getElementById('btnModalCancelarNuevaPass')?.addEventListener('click', () => {
       cancelarFormNuevaPassModalRecuperar();
     });
-    document.getElementById('btnCopiarEnlaceVerificacion')?.addEventListener('click', () => {
-      void copiarEnlaceVerificacion();
-    });
     document.getElementById('btnGuardarResetPass')?.addEventListener('click', () => {
       void guardarNuevaContrasenaDesdeReset();
     });
     document.getElementById('btnCancelarReset')?.addEventListener('click', () => cancelarVistaResetPassword());
-    document.getElementById('btnAuthReenviarVerificacion')?.addEventListener('click', () => {
-      void reenviarCorreoVerificacionDesdeUi();
-    });
-    document.getElementById('btnAuthPostRegVolverLogin')?.addEventListener('click', () => {
-      ocultarBloqueCorreoPendiente();
-      switchAuthTab('login');
-    });
     const modalRec = document.getElementById('modalRecuperarClave');
     if (modalRec) {
       modalRec.addEventListener('click', (e) => {

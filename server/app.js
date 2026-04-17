@@ -9,7 +9,6 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { sendTransactionalMail } = require('./mail');
 const {
   normalizeEmail,
   userCount,
@@ -24,11 +23,8 @@ const {
   replaceAllOrders,
   getMeta,
   setMeta,
-  createVerifyEmailToken,
   createPasswordResetToken,
-  consumeVerifyEmailToken,
   consumePasswordResetToken,
-  setUserEmailVerified,
   deleteUserById,
 } = require('./data');
 
@@ -62,52 +58,9 @@ function publicAppBaseUrl(req) {
   return String(`${req.protocol}://${req.get('host') || `localhost:${PORT}`}`).replace(/\/$/, '');
 }
 
-/** Si es true: verificación y recuperación devuelven enlaces en JSON (sin Resend ni SMTP). Solo para despliegues controlados. */
-function authLinksInResponseEnabled() {
-  const v = String(process.env.AUTH_LINKS_IN_RESPONSE || '').trim().toLowerCase();
-  return v === '1' || v === 'true' || v === 'yes';
-}
-
-function buildVerifyUrl(token, req) {
-  const base = publicAppBaseUrl(req);
-  return `${base}/?verify=${encodeURIComponent(token)}`;
-}
-
 function buildResetUrl(token, req) {
   const base = publicAppBaseUrl(req);
   return `${base}/?reset=${encodeURIComponent(token)}`;
-}
-
-async function enviarCorreoConfirmacion(email, token, req) {
-  const base = publicAppBaseUrl(req);
-  const link = `${base}/?verify=${encodeURIComponent(token)}`;
-  const subject = 'Confirma tu correo — gestión de pedidos';
-  const text =
-    `Hola,\n\nAbre este enlace para confirmar tu correo (válido 48 horas):\n${link}\n\nSi no creaste una cuenta, ignora este mensaje.\n`;
-  const html = `<p>Hola,</p><p>Confirma tu correo con el siguiente enlace (válido 48 horas).</p><p><a href="${link}">Confirmar correo</a></p><p style="font-size:12px;color:#666;word-break:break-all">${link}</p>`;
-  await sendTransactionalMail({ to: email, subject, html, text });
-}
-
-async function enviarCorreoRecuperacion(email, token, req) {
-  const base = publicAppBaseUrl(req);
-  const link = `${base}/?reset=${encodeURIComponent(token)}`;
-  const subject = 'Restablecer contraseña — gestión de pedidos';
-  const text =
-    `Hola,\n\nPara crear una contraseña nueva, abre este enlace (válido 1 hora):\n${link}\n\nSi no solicitaste el cambio, ignora este mensaje.\n`;
-  const html = `<p>Hola,</p><p>Para elegir una <strong>contraseña nueva</strong>, usa el botón o enlace (válido 1 hora).</p><p><a href="${link}">Restablecer contraseña</a></p><p style="font-size:12px;color:#666;word-break:break-all">${link}</p>`;
-  await sendTransactionalMail({ to: email, subject, html, text });
-}
-
-const mensajeCorreoEnviadoGenerico =
-  'Si existe una cuenta con ese correo, te enviamos un mensaje. Revisa la bandeja de entrada, la carpeta de spam y el apartado de promociones. ' +
-  'Si tu cuenta aún no tiene el correo confirmado, el asunto será de confirmación (no de contraseña) hasta que confirmes.';
-
-function mailDeliveryConfigured() {
-  const from = String(process.env.MAIL_FROM || '').trim();
-  if (!from) return false;
-  const resend = String(process.env.RESEND_API_KEY || '').trim();
-  const smtp = String(process.env.SMTP_HOST || '').trim();
-  return !!(resend || smtp);
 }
 
 function asyncHandler(fn) {
@@ -281,8 +234,6 @@ app.get(
   asyncHandler(async (_req, res) => {
     res.json({
       hasUsers: (await userCount()) > 0,
-      mailConfigured: mailDeliveryConfigured(),
-      authLinksInResponse: authLinksInResponseEnabled(),
     });
   })
 );
@@ -312,51 +263,11 @@ app.post(
       return;
     }
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
-    const primerUsuario = count === 0;
-    const emailVerified = primerUsuario;
-    const user = await createUser(username, email, hash, role, { emailVerified });
-
-    if (primerUsuario) {
-      const token = signToken(user);
-      res.status(201).json({
-        token,
-        user: { id: user.id, username: user.username, email: user.email, role: user.role },
-      });
-      return;
-    }
-
-    if (authLinksInResponseEnabled()) {
-      const verifyToken = await createVerifyEmailToken(user.id);
-      res.status(201).json({
-        needsEmailVerification: true,
-        email: user.email,
-        message:
-          'Tu cuenta está creada. Copia el enlace que ves abajo para confirmar el correo (no se envía mensaje al buzón en este modo).',
-        verifyUrl: buildVerifyUrl(verifyToken, req),
-      });
-      return;
-    }
-
-    let verifyToken;
-    try {
-      verifyToken = await createVerifyEmailToken(user.id);
-      await enviarCorreoConfirmacion(email, verifyToken, req);
-    } catch (err) {
-      try {
-        await deleteUserById(user.id);
-      } catch (_e) {}
-      res.status(503).json({
-        error:
-          'No pudimos enviar el correo de confirmación. Configura RESEND_API_KEY (o SMTP) y MAIL_FROM, o activa AUTH_LINKS_IN_RESPONSE=true para obtener el enlace en pantalla.',
-        detail: String(err.message || err),
-      });
-      return;
-    }
-
+    const user = await createUser(username, email, hash, role);
+    const token = signToken(user);
     res.status(201).json({
-      needsEmailVerification: true,
-      email: user.email,
-      message: 'Te enviamos un correo para confirmar tu cuenta. Abre el enlace y luego podrás iniciar sesión.',
+      token,
+      user: { id: user.id, username: user.username, email: user.email, role: user.role },
     });
   })
 );
@@ -389,118 +300,15 @@ app.post(
       res.status(404).json({ error: 'No hay ninguna cuenta registrada con ese correo.' });
       return;
     }
-    const tieneCorreo = !!row.email;
-    const verificado = tieneCorreo && row.email_verified_at != null;
-    if (authLinksInResponseEnabled()) {
-      if (!verificado) {
-        const vtoken = await createVerifyEmailToken(row.id);
-        // eslint-disable-next-line no-console
-        console.log('[delivery] forgot-password: token de CONFIRMACIÓN (sin correo; AUTH_LINKS_IN_RESPONSE).');
-        res.json({
-          ok: true,
-          pendingEmailVerification: true,
-          message:
-            'Tu cuenta aún no tiene el correo confirmado. Pulsa «Confirmar correo» para continuar y luego podrás elegir una contraseña nueva.',
-          verifyToken: vtoken,
-          verifyUrl: buildVerifyUrl(vtoken, req),
-        });
-      } else {
-        const token = await createPasswordResetToken(row.id);
-        // eslint-disable-next-line no-console
-        console.log('[delivery] forgot-password: token RESTABLECER contraseña (sin correo; AUTH_LINKS_IN_RESPONSE).');
-        res.json({
-          ok: true,
-          message: 'Elige una contraseña nueva (válido 1 hora; no se envía correo en este modo).',
-          resetToken: token,
-          resetUrl: buildResetUrl(token, req),
-        });
-      }
-      return;
-    }
-    try {
-      if (!verificado) {
-        const vtoken = await createVerifyEmailToken(row.id);
-        await enviarCorreoConfirmacion(email, vtoken, req);
-        // eslint-disable-next-line no-console
-        console.log('[delivery] forgot-password: enviado correo de CONFIRMACIÓN (cuenta sin correo verificado).');
-      } else {
-        const token = await createPasswordResetToken(row.id);
-        await enviarCorreoRecuperacion(email, token, req);
-        // eslint-disable-next-line no-console
-        console.log('[delivery] forgot-password: enviado correo de RESTABLECER contraseña.');
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[delivery] forgot-password: fallo al enviar correo:', err);
-      res.status(503).json({
-        error: 'No se pudo enviar el correo. Revisa la configuración del servidor (correo y URL pública).',
-        detail: String(err.message || err),
-      });
-      return;
-    }
+    const token = await createPasswordResetToken(row.id);
     // eslint-disable-next-line no-console
-    console.log('[delivery] forgot-password: envío correcto hacia', email.replace(/(^.).*(@.+$)/, '$1***$2'));
-    res.json({ ok: true, message: mensajeCorreoEnviadoGenerico });
-  })
-);
-
-app.post(
-  '/api/auth/verify-email',
-  asyncHandler(async (req, res) => {
-    const token = String(req.body?.token || '').trim();
-    if (!token) {
-      res.status(400).json({ error: 'Falta el token de verificación.' });
-      return;
-    }
-    const userId = await consumeVerifyEmailToken(token);
-    if (!userId) {
-      res.status(400).json({
-        error: 'El enlace no es válido o ha caducado. Pide un nuevo correo de confirmación desde la pantalla de acceso.',
-      });
-      return;
-    }
-    await setUserEmailVerified(userId);
-    res.json({ ok: true, message: 'Correo confirmado. Ya puedes iniciar sesión.' });
-  })
-);
-
-app.post(
-  '/api/auth/resend-verification',
-  asyncHandler(async (req, res) => {
-    const email = normalizeEmail(req.body?.email || '');
-    if (!correoValido(email)) {
-      res.status(400).json({ error: 'Indica un correo electrónico válido.' });
-      return;
-    }
-    const row = await getUserRowByEmail(email);
-    if (!row || !row.email) {
-      res.json({ ok: true, message: mensajeCorreoEnviadoGenerico });
-      return;
-    }
-    if (row.email_verified_at != null) {
-      res.json({ ok: true, message: 'Ese correo ya está confirmado. Puedes iniciar sesión.' });
-      return;
-    }
-    if (authLinksInResponseEnabled()) {
-      const vtoken = await createVerifyEmailToken(row.id);
-      res.json({
-        ok: true,
-        message: 'Copia el enlace de abajo para confirmar tu correo (no se envía mensaje al buzón en este modo).',
-        verifyUrl: buildVerifyUrl(vtoken, req),
-      });
-      return;
-    }
-    try {
-      const vtoken = await createVerifyEmailToken(row.id);
-      await enviarCorreoConfirmacion(email, vtoken, req);
-    } catch (err) {
-      res.status(503).json({
-        error: 'No se pudo enviar el correo. Revisa la configuración del servidor.',
-        detail: String(err.message || err),
-      });
-      return;
-    }
-    res.json({ ok: true, message: 'Si el correo existe y falta confirmar, te enviamos un nuevo enlace.' });
+    console.log('[delivery] forgot-password: token de restablecimiento (solo en app / enlace, sin correo).');
+    res.json({
+      ok: true,
+      message: 'Escribe tu nueva contraseña abajo (enlace válido 1 hora). No se envía ningún correo.',
+      resetToken: token,
+      resetUrl: buildResetUrl(token, req),
+    });
   })
 );
 
@@ -545,14 +353,6 @@ app.post(
     const row = await getUserRowByEmail(email);
     if (!row) {
       res.status(401).json({ error: 'Correo o contraseña incorrectos' });
-      return;
-    }
-    if (row.email && row.email_verified_at == null) {
-      res.status(403).json({
-        error:
-          'Debes confirmar tu correo antes de entrar. Revisa tu bandeja (y spam) o usa «Reenviar correo de confirmación».',
-        code: 'EMAIL_NOT_VERIFIED',
-      });
       return;
     }
     const ok = await bcrypt.compare(password, row.password_hash);
@@ -609,7 +409,7 @@ app.post(
       return;
     }
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
-    const user = await createUser(username, email, hash, role, { emailVerified: true });
+    const user = await createUser(username, email, hash, role);
     res.status(201).json({ user });
   })
 );
