@@ -364,18 +364,18 @@ function flushSyncPedidosAlSalir() {
     syncRemotoTimer = null;
   }
   if (!sesionUsuario || !appEstaOnline() || !hayPedidosSyncPendiente()) return;
-  // keepalive: intenta completar el PUT aunque se cierre/recargue la pestaña.
   try {
     const token = getAuthToken();
     if (!token || !esSesionAdmin()) {
       void syncPedidosAlServidor().catch((e) => console.error(e));
       return;
     }
+    const revEnviada = pedidosLocalRev || cargarPedidosLocalRev();
     const orders = JSON.parse(JSON.stringify(pedidos || []));
     const body = JSON.stringify({
       orders,
       orderIndex: orders.map((p) => p.id),
-      clientRevision: pedidosLocalRev || cargarPedidosLocalRev(),
+      clientRevision: revEnviada,
     });
     void fetch('/api/orders', {
       method: 'PUT',
@@ -388,7 +388,9 @@ function flushSyncPedidosAlSalir() {
       credentials: 'same-origin',
     })
       .then((r) => {
-        if (r && r.ok) marcarPedidosSyncPendiente(false);
+        const revAhora = pedidosLocalRev || cargarPedidosLocalRev();
+        // Solo quitar pendiente si no hubo cambios más nuevos mientras el PUT viajaba.
+        if (r && r.ok && revEnviada === revAhora) marcarPedidosSyncPendiente(false);
       })
       .catch((e) => console.error(e));
   } catch (e) {
@@ -457,53 +459,108 @@ async function syncPedidosAlServidor() {
         }
       } catch (e) {
         if (e && e.code === 'STALE_ORDERS') {
-          // Otra copia más nueva en servidor: si aún hay cambios locales, reintentar con rev mayor.
           bumpPedidosLocalRev();
           syncPedidosRepetir = true;
           continue;
         }
         throw e;
       }
-      if (revAlEnviar !== pedidosLocalRev) {
+      if (revAlEnviar !== (pedidosLocalRev || cargarPedidosLocalRev())) {
         syncPedidosRepetir = true;
       }
     } while (syncPedidosRepetir);
-    marcarPedidosSyncPendiente(false);
+    if (!syncPedidosRepetir) marcarPedidosSyncPendiente(false);
+  } catch (e) {
+    marcarPedidosSyncPendiente(true);
+    throw e;
   } finally {
     syncPedidosEnCurso = false;
+    if (syncPedidosRepetir && hayPedidosSyncPendiente()) {
+      syncPedidosRepetir = false;
+      window.setTimeout(() => {
+        void syncPedidosAlServidor().catch((err) => console.error(err));
+      }, 0);
+    }
   }
 }
 
-async function refrescarPedidosDesdeApi() {
-  // Si hay cambios locales sin subir, subirlos y CONSERVAR lo local.
-  // Un GET inmediato puede devolver la lista vieja y borrar los pedidos nuevos.
-  if (hayPedidosSyncPendiente()) {
-    await syncPedidosAlServidor();
-    return;
-  }
-  const data = await apiJson('/api/orders', { method: 'GET' });
-  const raw = Array.isArray(data.orders) ? data.orders : [];
-  pedidos = deduplicarPedidosPorId(raw.map(normalizarPedidoEnMemoria));
+function aplicarPedidosDesdeServidor(raw) {
+  pedidos = deduplicarPedidosPorId((Array.isArray(raw) ? raw : []).map(normalizarPedidoEnMemoria));
   if (pedidos.length > 0) {
     nextPedidoId = Math.max(...pedidos.map((p) => p.id), 0) + 1;
   } else {
     nextPedidoId = 1;
   }
   guardarCachePedidos();
-  marcarPedidosSyncPendiente(false);
+}
 
-  // Aviso si el admin modificó el orden (solo mensajeros reciben routeNotice).
-  if (data && data.routeNotice && data.routeNotice.at) {
-    const at = Number(data.routeNotice.at) || 0;
-    const key = `delivery_route_notice_seen_u${sesionUsuario ? sesionUsuario.id : '0'}`;
-    let prev = 0;
-    try { prev = Number(localStorage.getItem(key) || '0') || 0; } catch (_e) { prev = 0; }
-    if (at > prev) {
-      const msg = String(data.routeNotice.message || 'Se modificó el orden de tus pedidos.');
-      mostrarToast(msg, 'info', 9000);
-      try { localStorage.setItem(key, String(at)); } catch (_e) {}
-    }
+function avisarCambioOrdenSiHaceFalta(data) {
+  if (!data || !data.routeNotice || !data.routeNotice.at) return;
+  const at = Number(data.routeNotice.at) || 0;
+  const key = `delivery_route_notice_seen_u${sesionUsuario ? sesionUsuario.id : '0'}`;
+  let prev = 0;
+  try { prev = Number(localStorage.getItem(key) || '0') || 0; } catch (_e) { prev = 0; }
+  if (at > prev) {
+    const msg = String(data.routeNotice.message || 'Se modificó el orden de tus pedidos.');
+    mostrarToast(msg, 'info', 9000);
+    try { localStorage.setItem(key, String(at)); } catch (_e) {}
   }
+}
+
+async function refrescarPedidosDesdeApi() {
+  if (esSesionAdmin()) {
+    if (hayPedidosSyncPendiente()) {
+      await syncPedidosAlServidor();
+      return;
+    }
+    const data = await apiJson('/api/orders', { method: 'GET' });
+    if (hayPedidosSyncPendiente()) return;
+    const serverRev = Number(data.clientRevision || 0) || 0;
+    const localRev = pedidosLocalRev || cargarPedidosLocalRev();
+    // Solo el admin puede subir su lista local si el servidor quedó atrás.
+    if (localRev > 0 && serverRev < localRev) {
+      marcarPedidosSyncPendiente(true);
+      await syncPedidosAlServidor();
+      return;
+    }
+    aplicarPedidosDesdeServidor(data.orders);
+    marcarPedidosSyncPendiente(false);
+    avisarCambioOrdenSiHaceFalta(data);
+    return;
+  }
+
+  // Mensajero: el admin define qué pedidos existen. No reenviar los que ya se eliminaron.
+  const data = await apiJson('/api/orders', { method: 'GET' });
+  const delServidor = deduplicarPedidosPorId(
+    (Array.isArray(data.orders) ? data.orders : []).map(normalizarPedidoEnMemoria)
+  );
+  if (hayPedidosSyncPendiente()) {
+    const local = deduplicarPedidosPorId((cargarCachePedidos() || []).map(normalizarPedidoEnMemoria));
+    const localPorId = new Map(local.map((p) => [Number(p.id), p]));
+    let huboCambioLocal = false;
+    pedidos = delServidor.map((p) => {
+      const loc = localPorId.get(Number(p.id));
+      if (!loc) return p;
+      huboCambioLocal = true;
+      return loc;
+    });
+    if (pedidos.length > 0) {
+      nextPedidoId = Math.max(...pedidos.map((p) => p.id), 0) + 1;
+    } else {
+      nextPedidoId = 1;
+    }
+    guardarCachePedidos();
+    if (huboCambioLocal) {
+      marcarPedidosSyncPendiente(true);
+      await syncPedidosAlServidor();
+    } else {
+      marcarPedidosSyncPendiente(false);
+    }
+  } else {
+    aplicarPedidosDesdeServidor(delServidor);
+    marcarPedidosSyncPendiente(false);
+  }
+  avisarCambioOrdenSiHaceFalta(data);
 }
 
 function escapeHtmlAttr(s) {
@@ -7569,9 +7626,8 @@ async function iniciarApp() {
     // primero se suben y se conservan; no se pisan con el servidor.
     cargarPedidosDesdeLocalStorage();
     try {
-      if (hayPedidosSyncPendiente()) {
+      if (esSesionAdmin() && hayPedidosSyncPendiente()) {
         await forzarSyncPedidosAhora();
-        // Mantener lo local recién subido (o pendiente si falló el sync).
       } else {
         await refrescarPedidosDesdeApi();
       }
@@ -7641,8 +7697,20 @@ async function iniciarApp() {
   }
 }
 
-function cerrarSesionApp() {
+async function cerrarSesionApp() {
   cerrarMenuUsuario();
+  try {
+    if (sesionUsuario && esSesionAdmin() && appEstaOnline()) {
+      if (syncRemotoTimer) {
+        clearTimeout(syncRemotoTimer);
+        syncRemotoTimer = null;
+      }
+      marcarPedidosSyncPendiente(true);
+      await forzarSyncPedidosAhora();
+    }
+  } catch (e) {
+    console.error(e);
+  }
   setAuthToken('');
   guardarSesionUsuarioCache(null);
   sesionUsuario = null;
@@ -7667,7 +7735,6 @@ async function entrarAppConSesion(user) {
   if (cambioUsuario) {
     pedidos = [];
     nextPedidoId = 1;
-    limpiarCachePedidosLocal();
   }
 
   sesionUsuario = user;

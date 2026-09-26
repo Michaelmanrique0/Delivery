@@ -155,7 +155,18 @@ async function unassignOrdersFromUser(userId) {
   }
 }
 
-async function buildOrdersResponseForUser(user) {
+/** Un PUT a la vez: si dos guardados se cruzan, el viejo puede dejar otra vez los pedidos eliminados. */
+let ordersWriteLock = Promise.resolve();
+function withOrdersWriteLock(fn) {
+  const run = ordersWriteLock.then(fn, fn);
+  ordersWriteLock = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
+async function buildOrdersResponseForUser(user, extra = {}) {
   const rows = await getAllOrdersRows();
   const byId = new Map();
   for (const row of rows) {
@@ -183,9 +194,8 @@ async function buildOrdersResponseForUser(user) {
         seen.add(id);
       }
     }
-    const restIds = [...byId.keys()].filter((id) => !seen.has(id)).sort((a, b) => a - b);
-    for (const id of restIds) ordered.push(byId.get(id));
-    return { orders: ordered, orderIndex: ordered.map((p) => p.id) };
+    // Solo lo que está en order_index: no reinyectar pedidos viejos que quedaron huérfanos.
+    return { orders: ordered, orderIndex: ordered.map((p) => p.id), ...extra };
   }
 
   const mine = [];
@@ -239,7 +249,7 @@ async function buildOrdersResponseForUser(user) {
     routeNotice = null;
   }
 
-  return { orders: ordered, orderIndex: ordered.map((p) => p.id), routeNotice };
+  return { orders: ordered, orderIndex: ordered.map((p) => p.id), routeNotice, ...extra };
 }
 
 // --- Auth ---
@@ -885,7 +895,8 @@ app.delete(
 // --- Orders ---
 
 app.get('/api/orders', asyncHandler(authMiddleware), asyncHandler(async (req, res) => {
-  res.json(await buildOrdersResponseForUser(req.user));
+  const lastRev = Number((await getMeta('orders_client_rev_v1')) || '0') || 0;
+  res.json(await buildOrdersResponseForUser(req.user, { clientRevision: lastRev }));
 }));
 
 app.put(
@@ -902,31 +913,37 @@ app.put(
     if (!Array.isArray(orderIndex)) {
       orderIndex = orders.map((p) => p.id);
     }
-    const clientRev = Number(req.body?.clientRevision);
-    const lastRev = Number((await getMeta('orders_client_rev_v1')) || '0') || 0;
-    if (Number.isFinite(clientRev) && clientRev > 0 && clientRev < lastRev) {
-      res.status(409).json({
-        error: 'Hay una versión más nueva de los pedidos en el servidor',
-        code: 'STALE_ORDERS',
-        lastRevision: lastRev,
-      });
-      return;
-    }
-    const rows = orders
-      .filter((p) => p && p.id != null && Number.isFinite(Number(p.id)))
-      .map((p) => ({
-        id: Number(p.id),
-        payload: JSON.stringify(p),
-      }));
-    await replaceAllOrders(rows);
-    await setMeta(
-      'order_index',
-      JSON.stringify(orderIndex.map((oid) => Number(oid)).filter(Number.isFinite))
-    );
-    if (Number.isFinite(clientRev) && clientRev > 0) {
-      await setMeta('orders_client_rev_v1', String(Math.floor(clientRev)));
-    }
-    res.json(await buildOrdersResponseForUser(req.user));
+    await withOrdersWriteLock(async () => {
+      const clientRev = Number(req.body?.clientRevision);
+      const lastRev = Number((await getMeta('orders_client_rev_v1')) || '0') || 0;
+      if (Number.isFinite(clientRev) && clientRev > 0 && clientRev < lastRev) {
+        res.status(409).json({
+          error: 'Hay una versión más nueva de los pedidos en el servidor',
+          code: 'STALE_ORDERS',
+          lastRevision: lastRev,
+        });
+        return;
+      }
+      const rows = orders
+        .filter((p) => p && p.id != null && Number.isFinite(Number(p.id)))
+        .map((p) => ({
+          id: Number(p.id),
+          payload: JSON.stringify(p),
+        }));
+      await replaceAllOrders(rows);
+      await setMeta(
+        'order_index',
+        JSON.stringify(orderIndex.map((oid) => Number(oid)).filter(Number.isFinite))
+      );
+      if (Number.isFinite(clientRev) && clientRev > 0) {
+        await setMeta('orders_client_rev_v1', String(Math.floor(clientRev)));
+      }
+      res.json(
+        await buildOrdersResponseForUser(req.user, {
+          clientRevision: Number.isFinite(clientRev) && clientRev > 0 ? Math.floor(clientRev) : lastRev,
+        })
+      );
+    });
   })
 );
 
@@ -948,13 +965,14 @@ app.put(
       orderIndex = orders.map((p) => p.id);
     }
     const uid = String(req.user.id);
+    const existingRows = await getAllOrdersRows();
+    const existingIds = new Set(existingRows.map((r) => Number(r.id)));
     for (const p of orders) {
       if (!p || p.id == null) continue;
-      if (String(p.assignedTo || '') !== uid) {
-        res.status(403).json({ error: 'No puedes modificar pedidos que no te están asignados' });
-        return;
-      }
-      await upsertOrderRow(Number(p.id), p);
+      const id = Number(p.id);
+      if (!existingIds.has(id)) continue;
+      if (String(p.assignedTo || '') !== uid) continue;
+      await upsertOrderRow(id, p);
     }
     const validIds = new Set(orders.filter((p) => String(p.assignedTo || '') === uid).map((p) => Number(p.id)));
     const filteredRoute = orderIndex.map((oid) => Number(oid)).filter((oid) => Number.isFinite(oid) && validIds.has(oid));
