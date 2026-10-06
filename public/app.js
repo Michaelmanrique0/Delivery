@@ -399,6 +399,35 @@ function flushSyncPedidosAlSalir() {
   }
 }
 
+function hayAlgunModalAbierto() {
+  const nodos = document.querySelectorAll(
+    '.modal-no-entregado-backdrop, #modalDecision, #modalPagoEntregado, #modalConfigNotificacion'
+  );
+  for (const el of nodos) {
+    if (el && el.style && el.style.display === 'flex') return true;
+  }
+  return false;
+}
+
+function configurarRefrescoPedidosMensajero() {
+  if (configurarRefrescoPedidosMensajero._listo) return;
+  configurarRefrescoPedidosMensajero._listo = true;
+  window.setInterval(() => {
+    if (!esSesionMensajero() || !appEstaOnline()) return;
+    if (document.visibilityState === 'hidden') return;
+    if (hayAlgunModalAbierto()) return;
+    const antes = pedidos.map((p) => Number(p.id)).join(',');
+    refrescarPedidosDesdeApi()
+      .then(() => {
+        const despues = pedidos.map((p) => Number(p.id)).join(',');
+        if (antes === despues) return;
+        renderPedidos();
+        actualizarMarcadores();
+      })
+      .catch((e) => console.error(e));
+  }, 4000);
+}
+
 function configurarFlushSyncPedidosAlSalir() {
   if (configurarFlushSyncPedidosAlSalir._listo) return;
   configurarFlushSyncPedidosAlSalir._listo = true;
@@ -7613,6 +7642,7 @@ async function iniciarApp() {
   exponerDebugAppDelivery();
   actualizarBannerOffline();
   configurarFlushSyncPedidosAlSalir();
+  configurarRefrescoPedidosMensajero();
 
   if (!appEstaOnline()) {
     cargarPedidosDesdeLocalStorage();

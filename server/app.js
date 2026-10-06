@@ -166,6 +166,30 @@ function withOrdersWriteLock(fn) {
   return run;
 }
 
+async function podarRutasMensajeros(idsVigentes) {
+  const keep = new Set(
+    (idsVigentes || []).map((id) => Number(id)).filter((id) => Number.isFinite(id))
+  );
+  const users = await listUsers();
+  for (const u of users) {
+    if (!u || u.role !== 'mensajero') continue;
+    const key = `route_u${u.id}`;
+    let route = [];
+    try {
+      route = JSON.parse((await getMeta(key)) || '[]');
+    } catch (_e) {
+      route = [];
+    }
+    if (!Array.isArray(route)) continue;
+    const filtered = route
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && keep.has(id));
+    if (filtered.length !== route.length) {
+      await setMeta(key, JSON.stringify(filtered));
+    }
+  }
+}
+
 async function buildOrdersResponseForUser(user, extra = {}) {
   const rows = await getAllOrdersRows();
   const byId = new Map();
@@ -198,11 +222,18 @@ async function buildOrdersResponseForUser(user, extra = {}) {
     return { orders: ordered, orderIndex: ordered.map((p) => p.id), ...extra };
   }
 
+  const indexSet = new Set(
+    orderIndex.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+  );
   const mine = [];
   for (const row of rows) {
     const p = parsePayloadRow(row);
     if (!p) continue;
-    if (String(p.assignedTo || '') === String(user.id)) mine.push(p);
+    const id = Number(p.id);
+    if (String(p.assignedTo || '') !== String(user.id)) continue;
+    // Si el admin ya lo quitó de la lista, no debe seguir en el repartidor.
+    if (indexSet.size > 0 && !indexSet.has(id)) continue;
+    mine.push(p);
   }
   const byMine = new Map(mine.map((p) => [Number(p.id), p]));
 
@@ -931,10 +962,9 @@ app.put(
           payload: JSON.stringify(p),
         }));
       await replaceAllOrders(rows);
-      await setMeta(
-        'order_index',
-        JSON.stringify(orderIndex.map((oid) => Number(oid)).filter(Number.isFinite))
-      );
+      const idsVigentes = orderIndex.map((oid) => Number(oid)).filter(Number.isFinite);
+      await setMeta('order_index', JSON.stringify(idsVigentes));
+      await podarRutasMensajeros(idsVigentes);
       if (Number.isFinite(clientRev) && clientRev > 0) {
         await setMeta('orders_client_rev_v1', String(Math.floor(clientRev)));
       }
