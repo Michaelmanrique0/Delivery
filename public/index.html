@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon.svg">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-<link rel="stylesheet" href="style.css?v=20260829tienda">
+<link rel="stylesheet" href="style.css?v=20261006histmensajero">
 <script>
 (function () {
   try {
@@ -379,13 +379,13 @@
       <button type="button" class="btn-info" onclick="cerrarPaginaHistorialEntregas()"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Volver</button>
       <h2 class="page-historial-entregas-titulo"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> Historial de entregas</h2>
     </div>
-    <p class="page-historial-entregas-intro">Resumen por día, montos recogidos y qué pedidos entregó cada repartidor.</p>
+    <p id="historialEntregasIntro" class="page-historial-entregas-intro">Resumen por día, montos recogidos y qué pedidos entregó cada repartidor.</p>
     <div class="historial-retencion-box">
       <label class="historial-retencion-label" for="historialRetencionDias">Conservar historial durante</label>
       <div class="historial-retencion-row">
         <input type="number" id="historialRetencionDias" class="historial-retencion-input" min="0" max="3650" step="1" value="30" inputmode="numeric" aria-describedby="historialRetencionHint">
         <span class="historial-retencion-unidad">días</span>
-        <button type="button" class="btn-primary" onclick="void guardarRetencionHistorialDesdeUI()">Guardar</button>
+        <button type="button" class="btn-primary" id="btnGuardarRetencionHistorial" onclick="void guardarRetencionHistorialDesdeUI()">Guardar</button>
       </div>
       <p id="historialRetencionHint" class="historial-retencion-hint">Los días más antiguos que el límite se eliminan solos. Usa 0 para no borrar nunca.</p>
     </div>
@@ -397,7 +397,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="app.js?v=20261006orden"></script>
+<script src="app.js?v=20261006histmensajero"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {

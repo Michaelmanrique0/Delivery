@@ -3214,7 +3214,7 @@ function aplicarVisibilidadPorRol() {
   const btnMenuUsuarios = document.getElementById('btnMenuUsuarios');
   if (btnMenuUsuarios) btnMenuUsuarios.style.display = esSesionAdmin() ? '' : 'none';
   const btnMenuHistorial = document.getElementById('btnMenuHistorialEntregas');
-  if (btnMenuHistorial) btnMenuHistorial.style.display = esSesionAdmin() ? '' : 'none';
+  if (btnMenuHistorial) btnMenuHistorial.style.display = esSesionAdmin() || esSesionMensajero() ? '' : 'none';
   const btnMediosPagoMenu = document.getElementById('btnMediosPagoMenu');
   if (btnMediosPagoMenu) btnMediosPagoMenu.style.display = esSesionMensajero() ? '' : 'none';
 }
@@ -8371,6 +8371,10 @@ async function mostrarUiPaginaUsuariosRoles() {
 }
 
 async function restaurarVistaAppSesionTrasInicio() {
+  if (vistaAppSesionEsHistorialEntregas() && (esSesionAdmin() || esSesionMensajero())) {
+    await mostrarUiPaginaHistorialEntregas();
+    return;
+  }
   if (!esSesionAdmin()) {
     limpiarVistaAppSesion();
     quitarEstiloPreRestoreUsuariosRoles();
@@ -8675,11 +8679,20 @@ function resumenHistorialDesdePedidosPorFecha(fecha) {
       montoNequi: Number(p.montoNequi || 0),
       montoDaviplata: Number(p.montoDaviplata || 0),
       montoEfectivo: Number(p.montoEfectivo || 0),
+      valor: estado === 'entregado' ? obtenerValorAReclamarPedido(p) : 0,
+      pagaMensajero: estado === 'entregado' || (!!p.noEntregado && !!p.envioRecogido),
     });
   }
-  const porMensajero = [...porMap.values()].sort((a, b) =>
-    String(a.nombre).localeCompare(String(b.nombre), 'es')
-  );
+  const porMensajero = [...porMap.values()]
+    .map((bucket) => {
+      const resumenGuardado = metricasDesdePedidosHistorialCliente(bucket.pedidos);
+      return {
+        ...bucket,
+        entregados: resumenGuardado.entregados,
+        resumenGuardado,
+      };
+    })
+    .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es'));
 
   return {
     fecha: String(fecha),
@@ -8698,9 +8711,14 @@ function resumenHistorialDesdePedidosPorFecha(fecha) {
   };
 }
 
+function claveCacheHistorialEntregas() {
+  const id = sesionUsuario && sesionUsuario.id != null ? String(sesionUsuario.id) : '0';
+  return `${HISTORIAL_ENTREGAS_CACHE_KEY}_u${id}`;
+}
+
 function cargarHistorialEntregasCacheLocal() {
   try {
-    const raw = localStorage.getItem(HISTORIAL_ENTREGAS_CACHE_KEY);
+    const raw = localStorage.getItem(claveCacheHistorialEntregas());
     if (!raw) return [];
     const arr = JSON.parse(raw);
     return Array.isArray(arr) ? arr : [];
@@ -8711,8 +8729,56 @@ function cargarHistorialEntregasCacheLocal() {
 
 function guardarHistorialEntregasCacheLocal(dias) {
   try {
-    localStorage.setItem(HISTORIAL_ENTREGAS_CACHE_KEY, JSON.stringify(Array.isArray(dias) ? dias : []));
+    localStorage.setItem(claveCacheHistorialEntregas(), JSON.stringify(Array.isArray(dias) ? dias : []));
   } catch (_e) {}
+}
+
+function metricasDesdePedidosHistorialCliente(pedidos) {
+  const lista = Array.isArray(pedidos) ? pedidos : [];
+  let entregados = 0;
+  let devueltos = 0;
+  let sinEntregar = 0;
+  let pagadosNequi = 0;
+  let recogidoTotal = 0;
+  let recogidoEfectivo = 0;
+  let recogidoNequi = 0;
+  let recogidoDaviplata = 0;
+  let pagos = 0;
+  for (const p of lista) {
+    if (!p) continue;
+    if (p.estado === 'devuelto') devueltos += 1;
+    else if (p.estado === 'sin_entregar') sinEntregar += 1;
+    else entregados += 1;
+    if (p.estado === 'entregado') {
+      const tieneValor = p.valor != null && Number.isFinite(Number(p.valor));
+      const valor = tieneValor
+        ? Number(p.valor)
+        : Number(p.montoNequi || 0) + Number(p.montoDaviplata || 0) + Number(p.montoEfectivo || 0);
+      recogidoTotal += valor;
+      recogidoEfectivo += Number(p.montoEfectivo || 0);
+      recogidoNequi += Number(p.montoNequi || 0);
+      recogidoDaviplata += Number(p.montoDaviplata || 0);
+      if (Number(p.montoNequi || 0) > 0) pagadosNequi += 1;
+    }
+    const paga =
+      p.pagaMensajero != null
+        ? !!p.pagaMensajero
+        : p.estado === 'entregado' || p.estado === 'devuelto';
+    if (paga) pagos += 1;
+  }
+  const pagadoMensajero = pagos * TARIFA_PAGO_MENSAJERO;
+  return {
+    entregados,
+    devueltos,
+    sinEntregar,
+    pagadosNequi,
+    recogidoTotal,
+    recogidoEfectivo,
+    recogidoNequi,
+    recogidoDaviplata,
+    pagadoMensajero,
+    aEntregarTienda: Math.max(recogidoTotal - pagadoMensajero, 0),
+  };
 }
 
 function cargarRetencionHistorialLocal() {
@@ -8759,6 +8825,64 @@ function diaHistorialTieneDatos(d) {
     Number(d.aEntregarTienda || 0) > 0 ||
     (Array.isArray(d.porMensajero) && d.porMensajero.length > 0)
   );
+}
+
+function fusionarHistorialVisibleMensajero(servidor, local) {
+  const uid = sesionUsuario && sesionUsuario.id != null ? String(sesionUsuario.id) : '';
+  const nombre = (sesionUsuario && sesionUsuario.username) || 'Tus entregas';
+  const map = new Map();
+  for (const d of servidor || []) {
+    if (d && d.fecha) map.set(String(d.fecha), d);
+  }
+  for (const d of local || []) {
+    if (!d || !d.fecha || !diaHistorialTieneDatos(d)) continue;
+    const key = String(d.fecha);
+    const prev = map.get(key);
+    const pedidosLocal = (d.porMensajero || []).flatMap((m) => m.pedidos || []);
+    if (!prev) {
+      const metricas = metricasDesdePedidosHistorialCliente(pedidosLocal);
+      map.set(key, {
+        ...d,
+        ...metricas,
+        porMensajero: [
+          {
+            userId: uid || null,
+            nombre,
+            entregados: metricas.entregados,
+            pedidos: pedidosLocal,
+            resumenGuardado: metricas,
+          },
+        ],
+      });
+      continue;
+    }
+    const porId = new Map();
+    for (const p of (prev.porMensajero || []).flatMap((m) => m.pedidos || [])) {
+      if (p && p.id != null) porId.set(Number(p.id), p);
+    }
+    for (const p of pedidosLocal) {
+      if (p && p.id != null) porId.set(Number(p.id), p);
+    }
+    const pedidos = [...porId.values()];
+    const metricas = metricasDesdePedidosHistorialCliente(pedidos);
+    map.set(key, {
+      fecha: key,
+      ...metricas,
+      porMensajero: [
+        {
+          userId: uid || null,
+          nombre,
+          entregados: metricas.entregados,
+          pedidos,
+          resumenGuardado: metricas,
+        },
+      ],
+      actualizadoEn: Math.floor(Date.now() / 1000),
+    });
+  }
+  return [...map.values()]
+    .filter(diaHistorialTieneDatos)
+    .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
 }
 
 function fusionarHistorialDias(guardados, desdePedidos) {
@@ -8881,6 +9005,27 @@ function vistaAppSesionEsHistorialEntregas() {
   }
 }
 
+function htmlListaPedidosHistorial(pedidos) {
+  const lista = Array.isArray(pedidos) ? pedidos : [];
+  if (lista.length === 0) return '';
+  const items = lista
+    .map((p) => {
+      const nom = p.nombre ? ` — ${escapeHtmlTexto(p.nombre)}` : '';
+      return (
+        `<li><span class="historial-pedido-id">#${escapeHtmlTexto(String(p.id))}</span>` +
+        `${nom}` +
+        ` <span class="historial-pedido-estado historial-pedido-estado--${escapeHtmlAttr(p.estado)}">${escapeHtmlTexto(etiquetaEstadoHistorial(p.estado))}</span></li>`
+      );
+    })
+    .join('');
+  return (
+    `<div class="historial-mensajeros">` +
+    `<h4 class="historial-mensajeros-titulo">Tus pedidos</h4>` +
+    `<ul class="historial-mensajero-pedidos">${items}</ul>` +
+    `</div>`
+  );
+}
+
 function htmlBloquePorMensajeroHistorial(dia) {
   const lista = Array.isArray(dia.porMensajero) ? dia.porMensajero : [];
   if (lista.length === 0) {
@@ -8942,16 +9087,71 @@ function htmlTarjetaHistorialDia(dia) {
   );
 }
 
+function htmlTarjetaHistorialDiaPropio(dia) {
+  const fmt = (n) => Number(n || 0).toLocaleString('es-CO');
+  const nequi = Number(dia.recogidoNequi || 0);
+  const davi = Number(dia.recogidoDaviplata || 0);
+  const pedidos = (dia.porMensajero || []).flatMap((m) => m.pedidos || []);
+  const aTienda =
+    dia.aEntregarTienda != null
+      ? dia.aEntregarTienda
+      : Math.max(Number(dia.recogidoTotal || 0) - Number(dia.pagadoMensajero || 0), 0);
+  return (
+    `<article class="historial-dia-card">` +
+    `<h3 class="historial-dia-fecha">${escapeHtmlTexto(formatearFechaHistorialEs(dia.fecha))}</h3>` +
+    `<p class="historial-dia-fecha-iso">${escapeHtmlTexto(dia.fecha)}</p>` +
+    `<div class="historial-dia-grid">` +
+    `<div class="historial-dia-metric"><span class="historial-dia-metric-label">Entregados</span><strong>${fmt(dia.entregados)}</strong></div>` +
+    `<div class="historial-dia-metric"><span class="historial-dia-metric-label">Devueltos</span><strong>${fmt(dia.devueltos)}</strong></div>` +
+    `<div class="historial-dia-metric"><span class="historial-dia-metric-label">Sin entregar</span><strong>${fmt(dia.sinEntregar)}</strong></div>` +
+    `<div class="historial-dia-metric historial-dia-metric--money"><span class="historial-dia-metric-label">Recogido total</span><strong>$${fmt(dia.recogidoTotal)}</strong></div>` +
+    `<div class="historial-dia-metric historial-dia-metric--money"><span class="historial-dia-metric-label">Recogido en efectivo</span><strong>$${fmt(dia.recogidoEfectivo)}</strong></div>` +
+    `<div class="historial-dia-metric historial-dia-metric--money"><span class="historial-dia-metric-label">Recogido por Nequi</span><strong>$${fmt(nequi)}</strong></div>` +
+    `<div class="historial-dia-metric historial-dia-metric--money"><span class="historial-dia-metric-label">Recogido por Daviplata</span><strong>$${fmt(davi)}</strong></div>` +
+    `<div class="historial-dia-metric historial-dia-metric--money"><span class="historial-dia-metric-label">Tu pago</span><strong>$${fmt(dia.pagadoMensajero)}</strong></div>` +
+    `<div class="historial-dia-metric historial-dia-metric--money historial-dia-metric--tienda"><span class="historial-dia-metric-label">A entregar a tienda</span><strong>$${fmt(aTienda)}</strong></div>` +
+    `</div>` +
+    htmlListaPedidosHistorial(pedidos) +
+    `</article>`
+  );
+}
+
+function aplicarEdicionRetencionHistorialPorRol() {
+  const esAdmin = esSesionAdmin();
+  const input = document.getElementById('historialRetencionDias');
+  const btn = document.getElementById('btnGuardarRetencionHistorial');
+  const label = document.querySelector('label[for="historialRetencionDias"]');
+  const intro = document.getElementById('historialEntregasIntro');
+  if (input) input.disabled = !esAdmin;
+  if (btn) btn.hidden = !esAdmin;
+  if (label) {
+    label.textContent = esAdmin ? 'Conservar historial durante' : 'Tiempo de conservación';
+  }
+  if (intro) {
+    intro.textContent = esAdmin
+      ? 'Resumen por día, montos recogidos y qué pedidos entregó cada repartidor.'
+      : 'Tu historial de entregas. Dura el mismo tiempo que configuró el administrador.';
+  }
+}
+
 function pintarConfigRetencionHistorialUI(retencionDias) {
+  aplicarEdicionRetencionHistorialPorRol();
   const input = document.getElementById('historialRetencionDias');
   if (input) input.value = String(retencionDias);
   const hint = document.getElementById('historialRetencionHint');
   if (!hint) return;
   const n = Number(retencionDias);
-  if (!Number.isFinite(n) || n <= 0) {
+  const sinLimite = !Number.isFinite(n) || n <= 0;
+  if (esSesionMensajero()) {
+    hint.textContent = sinLimite
+      ? 'El administrador definió no borrar el historial. El tuyo tampoco se borra.'
+      : `El administrador conserva el historial ${n} día(s). El tuyo dura lo mismo y no puedes cambiarlo.`;
+    return;
+  }
+  if (sinLimite) {
     hint.textContent = 'Sin límite: el historial no se borrará automáticamente.';
   } else {
-    hint.textContent = `Los días con más de ${n} día(s) de antigüedad se eliminarán solos.`;
+    hint.textContent = `Los días con más de ${n} día(s) de antigüedad se eliminarán solos. Ese mismo plazo aplica al historial de cada repartidor.`;
   }
 }
 
@@ -9016,14 +9216,17 @@ async function refrescarHistorialEntregasUI(opts) {
   }
   // Actualizar solo días presentes en pedidos actuales; conservar el resto del servidor/caché.
   const desdePedidos = reconstruirHistorialDesdePedidosActuales();
+  const vistaMensajero = esSesionMensajero();
   let fusion = filtrarDiasHistorialPorRetencion(
-    fusionarHistorialDias(guardados, desdePedidos),
+    vistaMensajero
+      ? fusionarHistorialVisibleMensajero(guardados, desdePedidos)
+      : fusionarHistorialDias(guardados, desdePedidos),
     retencion
   );
   guardarHistorialEntregasCacheLocal(fusion);
-  // Solo sincronizar al servidor si pudimos leer el historial remoto (merge seguro).
-  // Si el GET falló, un PUT incompleto borraría días viejos.
-  if (cargoDesdeServidor && appEstaOnline() && getAuthToken() && esSesionAdmin()) {
+  // El repartidor solo consulta: no reescribe el historial de la tienda.
+  // Solo el admin sincroniza la lista completa si pudo leer el historial remoto.
+  if (!vistaMensajero && cargoDesdeServidor && appEstaOnline() && getAuthToken() && esSesionAdmin()) {
     try {
       const dataPut = await apiJson('/api/historial-entregas', {
         method: 'PUT',
@@ -9036,7 +9239,7 @@ async function refrescarHistorialEntregasUI(opts) {
     } catch (e) {
       console.error(e);
     }
-  } else if (desdePedidos.length > 0 && appEstaOnline() && getAuthToken()) {
+  } else if (!vistaMensajero && desdePedidos.length > 0 && appEstaOnline() && getAuthToken()) {
     // Sin GET exitoso: al menos upsert de los días reconstruidos (no borra otros).
     for (const dia of desdePedidos) {
       try {
@@ -9057,11 +9260,14 @@ async function refrescarHistorialEntregasUI(opts) {
     );
   }
   if (fusion.length === 0) {
-    host.innerHTML =
-      '<p class="historial-entregas-vacio">Aún no hay días registrados. Solo entran pedidos ya entregados, devueltos o sin entregar (no los pendientes ni en ruta). Al finalizar uno, aparecerá aquí.</p>';
+    host.innerHTML = vistaMensajero
+      ? '<p class="historial-entregas-vacio">Aún no tienes días en el historial. Cuando cierres una entrega, aparecerá aquí durante el tiempo que definió el administrador.</p>'
+      : '<p class="historial-entregas-vacio">Aún no hay días registrados. Solo entran pedidos ya entregados, devueltos o sin entregar (no los pendientes ni en ruta). Al finalizar uno, aparecerá aquí.</p>';
     return;
   }
-  host.innerHTML = fusion.map((d) => htmlTarjetaHistorialDia(d)).join('');
+  host.innerHTML = fusion
+    .map((d) => (vistaMensajero ? htmlTarjetaHistorialDiaPropio(d) : htmlTarjetaHistorialDia(d)))
+    .join('');
 }
 
 async function mostrarUiPaginaHistorialEntregas() {
@@ -9087,7 +9293,7 @@ async function mostrarUiPaginaHistorialEntregas() {
 
 async function abrirPaginaHistorialEntregas() {
   cerrarMenuUsuario();
-  if (!esSesionAdmin()) return;
+  if (!esSesionAdmin() && !esSesionMensajero()) return;
   guardarVistaAppSesionHistorialEntregas();
   await mostrarUiPaginaHistorialEntregas();
 }

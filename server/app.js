@@ -484,13 +484,15 @@ function filtrarDiasPorRetencion(dias, retencionDias) {
   return (dias || []).filter((d) => d && String(d.fecha || '') >= limite);
 }
 
+const TARIFA_PAGO_MENSAJERO_HISTORIAL = 12000;
+
 function normalizarPedidoHistorialSnap(p) {
   if (!p || typeof p !== 'object') return null;
   const id = Number(p.id);
   if (!Number.isFinite(id)) return null;
   const estado = String(p.estado || '').trim();
   const estadosOk = new Set(['entregado', 'devuelto', 'sin_entregar']);
-  return {
+  const snap = {
     id,
     nombre: String(p.nombre || '').trim().slice(0, 120),
     estado: estadosOk.has(estado) ? estado : 'entregado',
@@ -498,6 +500,102 @@ function normalizarPedidoHistorialSnap(p) {
     montoDaviplata: Math.max(0, Number(p.montoDaviplata) || 0),
     montoEfectivo: Math.max(0, Number(p.montoEfectivo) || 0),
   };
+  if (p.valor != null && Number.isFinite(Number(p.valor))) {
+    snap.valor = Math.max(0, Number(p.valor));
+  }
+  if (p.pagaMensajero != null) snap.pagaMensajero = !!p.pagaMensajero;
+  return snap;
+}
+
+function metricasDesdePedidosHistorial(pedidos) {
+  const lista = Array.isArray(pedidos) ? pedidos : [];
+  let entregados = 0;
+  let devueltos = 0;
+  let sinEntregar = 0;
+  let pagadosNequi = 0;
+  let recogidoTotal = 0;
+  let recogidoEfectivo = 0;
+  let recogidoNequi = 0;
+  let recogidoDaviplata = 0;
+  let pagos = 0;
+  for (const p of lista) {
+    if (!p) continue;
+    if (p.estado === 'devuelto') devueltos += 1;
+    else if (p.estado === 'sin_entregar') sinEntregar += 1;
+    else entregados += 1;
+    if (p.estado === 'entregado') {
+      const tieneValor = p.valor != null && Number.isFinite(Number(p.valor));
+      const valor = tieneValor
+        ? Number(p.valor)
+        : Number(p.montoNequi || 0) + Number(p.montoDaviplata || 0) + Number(p.montoEfectivo || 0);
+      recogidoTotal += valor;
+      recogidoEfectivo += Number(p.montoEfectivo || 0);
+      recogidoNequi += Number(p.montoNequi || 0);
+      recogidoDaviplata += Number(p.montoDaviplata || 0);
+      if (Number(p.montoNequi || 0) > 0) pagadosNequi += 1;
+    }
+    const paga =
+      p.pagaMensajero != null
+        ? !!p.pagaMensajero
+        : p.estado === 'entregado' || p.estado === 'devuelto';
+    if (paga) pagos += 1;
+  }
+  const pagadoMensajero = pagos * TARIFA_PAGO_MENSAJERO_HISTORIAL;
+  return {
+    entregados,
+    devueltos,
+    sinEntregar,
+    pagadosNequi,
+    recogidoTotal,
+    recogidoEfectivo,
+    recogidoNequi,
+    recogidoDaviplata,
+    pagadoMensajero,
+    aEntregarTienda: Math.max(recogidoTotal - pagadoMensajero, 0),
+  };
+}
+
+function resumenGuardadoMensajero(m) {
+  if (!m || !m.resumenGuardado || typeof m.resumenGuardado !== 'object') return null;
+  const r = m.resumenGuardado;
+  const pagadoMensajero = Math.max(0, Number(r.pagadoMensajero) || 0);
+  const recogidoTotal = Math.max(0, Number(r.recogidoTotal) || 0);
+  return {
+    entregados: Math.max(0, Number(r.entregados) || 0),
+    devueltos: Math.max(0, Number(r.devueltos) || 0),
+    sinEntregar: Math.max(0, Number(r.sinEntregar) || 0),
+    pagadosNequi: Math.max(0, Number(r.pagadosNequi) || 0),
+    recogidoTotal,
+    recogidoEfectivo: Math.max(0, Number(r.recogidoEfectivo) || 0),
+    recogidoNequi: Number(r.recogidoNequi) || 0,
+    recogidoDaviplata: Number(r.recogidoDaviplata) || 0,
+    pagadoMensajero,
+    aEntregarTienda: Math.max(0, recogidoTotal - pagadoMensajero),
+  };
+}
+
+function metricasDeBucketHistorial(m) {
+  return resumenGuardadoMensajero(m) || metricasDesdePedidosHistorial(m && m.pedidos);
+}
+
+function sumarMetricasHistorial(base, delta, signo) {
+  const keys = [
+    'entregados',
+    'devueltos',
+    'sinEntregar',
+    'pagadosNequi',
+    'recogidoTotal',
+    'recogidoEfectivo',
+    'recogidoNequi',
+    'recogidoDaviplata',
+    'pagadoMensajero',
+  ];
+  const out = {};
+  for (const k of keys) {
+    out[k] = Number(base[k] || 0) + signo * Number(delta[k] || 0);
+  }
+  out.aEntregarTienda = Math.max(0, out.recogidoTotal - out.pagadoMensajero);
+  return out;
 }
 
 function normalizarMensajeroHistorial(m) {
@@ -507,12 +605,75 @@ function normalizarMensajeroHistorial(m) {
   const pedidos = Array.isArray(m.pedidos)
     ? m.pedidos.map(normalizarPedidoHistorialSnap).filter(Boolean)
     : [];
+  const resumen = resumenGuardadoMensajero(m);
   return {
     userId,
     nombre: String(m.nombre || (userId ? `Usuario ${userId}` : 'Sin asignar')).trim().slice(0, 80),
     entregados: Math.max(0, Number(m.entregados) || 0),
     pedidos,
+    ...(resumen ? { resumenGuardado: resumen } : {}),
   };
+}
+
+/** Vista del repartidor: solo sus pedidos y sus totales. */
+function diaHistorialParaMensajero(dia, userId) {
+  if (!dia) return null;
+  const uid = String(userId);
+  const propios = (dia.porMensajero || []).filter((m) => m && String(m.userId || '') === uid);
+  if (propios.length === 0) return null;
+  const pedidos = propios.flatMap((m) => (Array.isArray(m.pedidos) ? m.pedidos : []));
+  const metricas = metricasDesdePedidosHistorial(pedidos);
+  return {
+    ...dia,
+    ...metricas,
+    porMensajero: propios,
+  };
+}
+
+/**
+ * El mensajero actualiza solo su parte del día.
+ * El resto de repartidores y la duración del historial no cambian.
+ */
+function fusionarDiaConAporteMensajero(prev, incoming, userId, nombreFallback) {
+  const uid = String(userId);
+  let propios = (incoming.porMensajero || []).filter((m) => m && String(m.userId || '') === uid);
+  if (propios.length === 0 && Array.isArray(incoming.porMensajero) && incoming.porMensajero.length > 0) {
+    propios = incoming.porMensajero.map((m) => ({ ...m, userId: uid }));
+  }
+  const pedidos = propios.flatMap((m) => (Array.isArray(m.pedidos) ? m.pedidos : []));
+  const metricas = metricasDesdePedidosHistorial(pedidos);
+  const bucket = normalizarMensajeroHistorial({
+    userId: uid,
+    nombre: (propios[0] && propios[0].nombre) || nombreFallback || `Mensajero ${uid}`,
+    entregados: metricas.entregados,
+    pedidos,
+    resumenGuardado: metricas,
+  });
+  const anteriores = prev && Array.isArray(prev.porMensajero) ? prev.porMensajero : [];
+  const previoPropio = anteriores.find((m) => m && String(m.userId || '') === uid) || null;
+  const otros = anteriores.filter((m) => m && String(m.userId || '') !== uid);
+  const porMensajero = bucket && bucket.pedidos.length > 0 ? [...otros, bucket] : otros;
+  const oldM = previoPropio ? metricasDeBucketHistorial(previoPropio) : metricasDesdePedidosHistorial([]);
+  const base = prev
+    ? {
+        entregados: prev.entregados,
+        devueltos: prev.devueltos,
+        sinEntregar: prev.sinEntregar,
+        pagadosNequi: prev.pagadosNequi,
+        recogidoTotal: prev.recogidoTotal,
+        recogidoEfectivo: prev.recogidoEfectivo,
+        recogidoNequi: prev.recogidoNequi,
+        recogidoDaviplata: prev.recogidoDaviplata,
+        pagadoMensajero: prev.pagadoMensajero,
+      }
+    : metricasDesdePedidosHistorial([]);
+  const totales = prev ? sumarMetricasHistorial(sumarMetricasHistorial(base, oldM, -1), metricas, 1) : metricas;
+  return normalizarDiaHistorial({
+    fecha: incoming.fecha,
+    ...totales,
+    porMensajero,
+    actualizadoEn: Math.floor(Date.now() / 1000),
+  });
 }
 
 function normalizarDiaHistorial(d) {
@@ -622,10 +783,20 @@ app.put(
 app.get(
   '/api/historial-entregas',
   asyncHandler(authMiddleware),
-  requireAdmin,
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     const { dias, config } = await cargarHistorialDiasFiltrados();
-    res.json({ dias, config });
+    if (req.user && req.user.role === 'mensajero') {
+      const propios = dias
+        .map((d) => diaHistorialParaMensajero(d, req.user.id))
+        .filter(Boolean);
+      res.json({ dias: propios, config, alcance: 'propio' });
+      return;
+    }
+    if (!req.user || req.user.role !== 'admin') {
+      res.status(403).json({ error: 'No autorizado' });
+      return;
+    }
+    res.json({ dias, config, alcance: 'todos' });
   })
 );
 
@@ -667,21 +838,40 @@ app.post(
     const actuales = parseHistorialDias(await getMeta(HISTORIAL_DIAS_META))
       .map(normalizarDiaHistorial)
       .filter(Boolean);
-    // No borrar un día con datos si llega un resumen vacío.
-    if (!diaHistorialTieneActividad(dia)) {
-      const prev = actuales.find((d) => d.fecha === dia.fecha);
-      if (prev && diaHistorialTieneActividad(prev)) {
+    const prev = actuales.find((d) => d.fecha === dia.fecha) || null;
+    let diaGuardado = dia;
+    if (req.user && req.user.role === 'mensajero') {
+      // No reemplaza el día completo: solo su parte. La retención la define el admin.
+      diaGuardado = fusionarDiaConAporteMensajero(
+        prev,
+        dia,
+        req.user.id,
+        req.user.username
+      );
+      if (!diaGuardado) {
+        res.status(400).json({ error: 'Día de historial inválido' });
+        return;
+      }
+      if (!diaHistorialTieneActividad(diaGuardado) && prev && diaHistorialTieneActividad(prev)) {
         res.json({ ok: true, dia: prev, config: cfg, conservado: true });
         return;
       }
+    } else if (!diaHistorialTieneActividad(dia) && prev && diaHistorialTieneActividad(prev)) {
+      // No borrar un día con datos si llega un resumen vacío.
+      res.json({ ok: true, dia: prev, config: cfg, conservado: true });
+      return;
     }
     const sinEste = actuales.filter((d) => d.fecha !== dia.fecha);
-    dia.actualizadoEn = Math.floor(Date.now() / 1000);
-    const dias = filtrarDiasPorRetencion([...sinEste, dia], cfg.retencionDias).sort((a, b) =>
+    diaGuardado.actualizadoEn = Math.floor(Date.now() / 1000);
+    const dias = filtrarDiasPorRetencion([...sinEste, diaGuardado], cfg.retencionDias).sort((a, b) =>
       b.fecha.localeCompare(a.fecha)
     );
     await setMeta(HISTORIAL_DIAS_META, JSON.stringify(dias));
-    res.json({ ok: true, dia, config: cfg });
+    const diaRespuesta =
+      req.user && req.user.role === 'mensajero'
+        ? diaHistorialParaMensajero(diaGuardado, req.user.id) || diaGuardado
+        : diaGuardado;
+    res.json({ ok: true, dia: diaRespuesta, config: cfg });
   })
 );
 

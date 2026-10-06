@@ -2807,6 +2807,11 @@ button i,
   font-size: 15px;
 }
 
+.historial-retencion-input:disabled {
+  background: #eef2f6;
+  color: #374151;
+}
+
 .historial-retencion-unidad {
   font-size: 14px;
   color: #4b5563;
