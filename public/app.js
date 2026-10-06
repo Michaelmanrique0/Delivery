@@ -416,13 +416,19 @@ function configurarRefrescoPedidosMensajero() {
     if (!esSesionMensajero() || !appEstaOnline()) return;
     if (document.visibilityState === 'hidden') return;
     if (hayAlgunModalAbierto()) return;
+    // No pisar el orden mientras se está guardando o el usuario acaba de mover la ruta.
+    if (hayPedidosSyncPendiente() || syncPedidosEnCurso) return;
     const antes = pedidos.map((p) => Number(p.id)).join(',');
     refrescarPedidosDesdeApi()
       .then(() => {
         const despues = pedidos.map((p) => Number(p.id)).join(',');
         if (antes === despues) return;
         renderPedidos();
-        actualizarMarcadores();
+        redibujarRutaDebounced(80);
+        const idsAntes = antes.split(',').filter(Boolean).sort().join(',');
+        const idsDespues = despues.split(',').filter(Boolean).sort().join(',');
+        // Altas o bajas de pedidos: actualizar pines sin reencuadrar (el zoom del usuario se queda).
+        if (idsAntes !== idsDespues) actualizarMarcadores({ conservarVista: true });
       })
       .catch((e) => console.error(e));
   }, 4000);
@@ -523,6 +529,52 @@ function aplicarPedidosDesdeServidor(raw) {
   guardarCachePedidos();
 }
 
+function fijarPedidosEnMemoria(lista) {
+  pedidos = deduplicarPedidosPorId(lista);
+  if (pedidos.length > 0) {
+    nextPedidoId = Math.max(...pedidos.map((p) => p.id), 0) + 1;
+  } else {
+    nextPedidoId = 1;
+  }
+  guardarCachePedidos();
+}
+
+/**
+ * El mensajero conserva el orden de su ruta. El servidor solo aporta pedidos nuevos
+ * y quita los que el admin ya eliminó. No reordena la lista local.
+ */
+function fusionarPedidosMensajeroConservandoOrden(delServidor, conservarObjetosLocales) {
+  const remotos = deduplicarPedidosPorId(
+    (Array.isArray(delServidor) ? delServidor : []).map(normalizarPedidoEnMemoria)
+  );
+  const porServidor = new Map(remotos.map((p) => [Number(p.id), p]));
+  const base = Array.isArray(pedidos) && pedidos.length > 0 ? pedidos : [];
+  const vistos = new Set();
+  const out = [];
+  for (const p of base) {
+    const id = Number(p && p.id);
+    if (!Number.isFinite(id) || vistos.has(id) || !porServidor.has(id)) continue;
+    vistos.add(id);
+    out.push(conservarObjetosLocales ? normalizarPedidoEnMemoria(p) : porServidor.get(id));
+  }
+  for (const p of remotos) {
+    const id = Number(p.id);
+    if (!Number.isFinite(id) || vistos.has(id)) continue;
+    vistos.add(id);
+    out.push(p);
+  }
+  return out;
+}
+
+function routeNoticeEsNuevo(data) {
+  if (!data || !data.routeNotice || !data.routeNotice.at) return false;
+  const at = Number(data.routeNotice.at) || 0;
+  const key = `delivery_route_notice_seen_u${sesionUsuario ? sesionUsuario.id : '0'}`;
+  let prev = 0;
+  try { prev = Number(localStorage.getItem(key) || '0') || 0; } catch (_e) { prev = 0; }
+  return at > prev;
+}
+
 function avisarCambioOrdenSiHaceFalta(data) {
   if (!data || !data.routeNotice || !data.routeNotice.at) return;
   const at = Number(data.routeNotice.at) || 0;
@@ -558,38 +610,24 @@ async function refrescarPedidosDesdeApi() {
     return;
   }
 
-  // Mensajero: el admin define qué pedidos existen. No reenviar los que ya se eliminaron.
+  // Mensajero: el admin define qué pedidos existen. El orden de la ruta es local
+  // y no se reemplaza por el del servidor (un refresco a mitad del zoom lo devolvía atrás).
+  const revAntes = pedidosLocalRev || cargarPedidosLocalRev();
   const data = await apiJson('/api/orders', { method: 'GET' });
   const delServidor = deduplicarPedidosPorId(
     (Array.isArray(data.orders) ? data.orders : []).map(normalizarPedidoEnMemoria)
   );
-  if (hayPedidosSyncPendiente()) {
-    const local = deduplicarPedidosPorId((cargarCachePedidos() || []).map(normalizarPedidoEnMemoria));
-    const localPorId = new Map(local.map((p) => [Number(p.id), p]));
-    let huboCambioLocal = false;
-    pedidos = delServidor.map((p) => {
-      const loc = localPorId.get(Number(p.id));
-      if (!loc) return p;
-      huboCambioLocal = true;
-      return loc;
-    });
-    if (pedidos.length > 0) {
-      nextPedidoId = Math.max(...pedidos.map((p) => p.id), 0) + 1;
-    } else {
-      nextPedidoId = 1;
-    }
-    guardarCachePedidos();
-    if (huboCambioLocal) {
-      marcarPedidosSyncPendiente(true);
-      await syncPedidosAlServidor();
-    } else {
-      marcarPedidosSyncPendiente(false);
-    }
-  } else {
+  const revAhora = pedidosLocalRev || cargarPedidosLocalRev();
+  const tocoOrdenLocal = hayPedidosSyncPendiente() || syncPedidosEnCurso || revAhora !== revAntes;
+  const adminReordeno = !tocoOrdenLocal && routeNoticeEsNuevo(data);
+  if (adminReordeno) {
     aplicarPedidosDesdeServidor(delServidor);
     marcarPedidosSyncPendiente(false);
+    avisarCambioOrdenSiHaceFalta(data);
+    return;
   }
-  avisarCambioOrdenSiHaceFalta(data);
+  fijarPedidosEnMemoria(fusionarPedidosMensajeroConservandoOrden(delServidor, tocoOrdenLocal));
+  if (!tocoOrdenLocal) marcarPedidosSyncPendiente(false);
 }
 
 function escapeHtmlAttr(s) {
@@ -6566,9 +6604,10 @@ function aplicarSeparacionVisualMarcadores() {
   });
 }
 
-function actualizarMarcadores() {
+function actualizarMarcadores(opciones) {
   if (!mapa) return;
-  mapaAjustado = false;
+  const conservarVista = !!(opciones && opciones.conservarVista);
+  if (!conservarVista) mapaAjustado = false;
   marcadores.forEach(item => mapa.removeLayer(item.marker));
   marcadores = [];
   if (rutaLayer) { mapa.removeLayer(rutaLayer); rutaLayer = null; }
