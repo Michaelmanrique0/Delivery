@@ -166,6 +166,98 @@ function withOrdersWriteLock(fn) {
   return run;
 }
 
+function claveRutaMensajero(uid) {
+  return `route_u${uid}`;
+}
+
+function claveRutaRevMensajero(uid) {
+  return `route_rev_u${uid}`;
+}
+
+async function leerRutaMensajero(uid) {
+  let route = [];
+  try {
+    route = JSON.parse((await getMeta(claveRutaMensajero(uid))) || '[]');
+  } catch (_e) {
+    route = [];
+  }
+  if (!Array.isArray(route)) return [];
+  return route.map((id) => Number(id)).filter((id) => Number.isFinite(id));
+}
+
+async function escribirRutaMensajero(uid, route) {
+  const clean = (route || []).map((id) => Number(id)).filter((id) => Number.isFinite(id));
+  await setMeta(claveRutaMensajero(uid), JSON.stringify(clean));
+}
+
+async function leerRutaRevMensajero(uid) {
+  return Math.max(0, Math.floor(Number((await getMeta(claveRutaRevMensajero(uid))) || '0') || 0));
+}
+
+async function escribirRutaRevMensajero(uid, rev) {
+  await setMeta(claveRutaRevMensajero(uid), String(Math.max(0, Math.floor(Number(rev) || 0))));
+}
+
+async function leerOrderIndexAdmin() {
+  let orderIndex = [];
+  try {
+    orderIndex = JSON.parse((await getMeta('order_index')) || '[]');
+  } catch (_e) {
+    orderIndex = [];
+  }
+  if (!Array.isArray(orderIndex)) return [];
+  return orderIndex.map((id) => Number(id)).filter((id) => Number.isFinite(id));
+}
+
+async function idsAsignadosMensajero(uid) {
+  const mine = new Set();
+  const rows = await getAllOrdersRows();
+  for (const row of rows) {
+    if (row.id == null) continue;
+    const p = parsePayloadRow(row);
+    if (!p) continue;
+    if (String(p.assignedTo || '') === String(uid)) mine.add(Number(p.id));
+  }
+  return mine;
+}
+
+/**
+ * Conserva el orden que ya tiene el mensajero.
+ * Los pedidos recién asignados (o que faltan en su ruta) se agregan al final,
+ * en el mismo orden que tiene el administrador.
+ */
+async function sincronizarRutaMensajeroConservandoOrden(uid) {
+  const mine = await idsAsignadosMensajero(uid);
+  const adminOrder = await leerOrderIndexAdmin();
+  const prev = await leerRutaMensajero(uid);
+  const route = [];
+  const seen = new Set();
+  for (const id of prev) {
+    if (!mine.has(id) || seen.has(id)) continue;
+    route.push(id);
+    seen.add(id);
+  }
+  for (const id of adminOrder) {
+    if (!mine.has(id) || seen.has(id)) continue;
+    route.push(id);
+    seen.add(id);
+  }
+  for (const id of mine) {
+    if (seen.has(id)) continue;
+    route.push(id);
+    seen.add(id);
+  }
+  await escribirRutaMensajero(uid, route);
+  return route;
+}
+
+async function quitarIdDeRutaMensajero(uid, orderId) {
+  const id = Number(orderId);
+  if (!Number.isFinite(id)) return;
+  const route = (await leerRutaMensajero(uid)).filter((x) => x !== id);
+  await escribirRutaMensajero(uid, route);
+}
+
 async function podarRutasMensajeros(idsVigentes) {
   const keep = new Set(
     (idsVigentes || []).map((id) => Number(id)).filter((id) => Number.isFinite(id))
@@ -173,19 +265,10 @@ async function podarRutasMensajeros(idsVigentes) {
   const users = await listUsers();
   for (const u of users) {
     if (!u || u.role !== 'mensajero') continue;
-    const key = `route_u${u.id}`;
-    let route = [];
-    try {
-      route = JSON.parse((await getMeta(key)) || '[]');
-    } catch (_e) {
-      route = [];
-    }
-    if (!Array.isArray(route)) continue;
-    const filtered = route
-      .map((id) => Number(id))
-      .filter((id) => Number.isFinite(id) && keep.has(id));
+    const route = await leerRutaMensajero(u.id);
+    const filtered = route.filter((id) => keep.has(id));
     if (filtered.length !== route.length) {
-      await setMeta(key, JSON.stringify(filtered));
+      await escribirRutaMensajero(u.id, filtered);
     }
   }
 }
@@ -280,7 +363,14 @@ async function buildOrdersResponseForUser(user, extra = {}) {
     routeNotice = null;
   }
 
-  return { orders: ordered, orderIndex: ordered.map((p) => p.id), routeNotice, ...extra };
+  const routeRevision = await leerRutaRevMensajero(user.id);
+  return {
+    orders: ordered,
+    orderIndex: ordered.map((p) => p.id),
+    routeNotice,
+    routeRevision,
+    ...extra,
+  };
 }
 
 // --- Auth ---
@@ -1194,9 +1284,36 @@ app.put(
       if (String(p.assignedTo || '') !== uid) continue;
       await upsertOrderRow(id, p);
     }
-    const validIds = new Set(orders.filter((p) => String(p.assignedTo || '') === uid).map((p) => Number(p.id)));
-    const filteredRoute = orderIndex.map((oid) => Number(oid)).filter((oid) => Number.isFinite(oid) && validIds.has(oid));
-    await setMeta(`route_u${req.user.id}`, JSON.stringify(filteredRoute));
+    const mine = await idsAsignadosMensajero(uid);
+    const clientRoute = orderIndex
+      .map((oid) => Number(oid))
+      .filter((oid) => Number.isFinite(oid) && mine.has(oid));
+    const seen = new Set(clientRoute);
+    const prevRoute = await leerRutaMensajero(uid);
+    const clientRev = Math.max(0, Math.floor(Number(req.body?.routeRevision) || 0));
+    const serverRev = await leerRutaRevMensajero(uid);
+    if (clientRev >= serverRev) {
+      for (const id of prevRoute) {
+        if (!mine.has(id) || seen.has(id)) continue;
+        clientRoute.push(id);
+        seen.add(id);
+      }
+      const adminOrder = await leerOrderIndexAdmin();
+      for (const id of adminOrder) {
+        if (!mine.has(id) || seen.has(id)) continue;
+        clientRoute.push(id);
+        seen.add(id);
+      }
+      for (const id of mine) {
+        if (seen.has(id)) continue;
+        clientRoute.push(id);
+        seen.add(id);
+      }
+      await escribirRutaMensajero(uid, clientRoute);
+      await escribirRutaRevMensajero(uid, Math.max(clientRev, serverRev));
+    } else {
+      await sincronizarRutaMensajeroConservandoOrden(uid);
+    }
     res.json(await buildOrdersResponseForUser(req.user));
   })
 );
@@ -1222,6 +1339,7 @@ app.patch(
       res.status(500).json({ error: 'Pedido corrupto' });
       return;
     }
+    const prevAssigned = p.assignedTo == null || String(p.assignedTo).trim() === '' ? null : String(p.assignedTo).trim();
     const assignUserId = req.body?.userId;
     if (assignUserId === null || assignUserId === '' || assignUserId === undefined) {
       p.assignedTo = null;
@@ -1240,26 +1358,11 @@ app.patch(
     }
     await upsertOrderRow(orderId, p);
 
-    // Al asignar a un mensajero, copiar el orden actual del admin a su ruta.
-    if (assignUserId !== null && assignUserId !== '' && assignUserId !== undefined) {
-      const uid = Number(assignUserId);
-      let orderIndex = [];
-      try {
-        orderIndex = JSON.parse((await getMeta('order_index')) || '[]');
-      } catch (_e) {
-        orderIndex = [];
-      }
-      if (!Array.isArray(orderIndex)) orderIndex = [];
-      const rows2 = await getAllOrdersRows();
-      const mineIds = new Set();
-      for (const row2 of rows2) {
-        if (row2.id == null) continue;
-        const pp = parsePayloadRow(row2);
-        if (!pp) continue;
-        if (String(pp.assignedTo || '') === String(uid)) mineIds.add(Number(pp.id));
-      }
-      const route = orderIndex.map((x) => Number(x)).filter((x) => Number.isFinite(x) && mineIds.has(x));
-      await setMeta(`route_u${uid}`, JSON.stringify(route));
+    if (prevAssigned && prevAssigned !== String(p.assignedTo || '')) {
+      await quitarIdDeRutaMensajero(prevAssigned, orderId);
+    }
+    if (p.assignedTo) {
+      await sincronizarRutaMensajeroConservandoOrden(p.assignedTo);
     }
     res.json({ order: p });
   })
@@ -1292,6 +1395,7 @@ app.post(
     }
     const rows = await getAllOrdersRows();
     const byId = new Map(rows.map((r) => [r.id, r]));
+    const prevPorPedido = new Map();
     for (const raw of orderIds) {
       const id = Number(raw);
       if (!Number.isFinite(id)) continue;
@@ -1299,28 +1403,20 @@ app.post(
       if (!r) continue;
       const p = parsePayloadRow(r);
       if (!p) continue;
+      const prev =
+        p.assignedTo == null || String(p.assignedTo).trim() === '' ? null : String(p.assignedTo).trim();
+      prevPorPedido.set(id, prev);
       p.assignedTo = String(uid);
       await upsertOrderRow(id, p);
     }
-
-    // Copiar el orden del admin a la ruta del mensajero (incluyendo los recién asignados).
-    let orderIndex = [];
-    try {
-      orderIndex = JSON.parse((await getMeta('order_index')) || '[]');
-    } catch (_e) {
-      orderIndex = [];
+    const otros = new Set();
+    for (const prev of prevPorPedido.values()) {
+      if (prev && prev !== String(uid)) otros.add(prev);
     }
-    if (!Array.isArray(orderIndex)) orderIndex = [];
-    const rows2 = await getAllOrdersRows();
-    const mineIds = new Set();
-    for (const row2 of rows2) {
-      if (row2.id == null) continue;
-      const pp = parsePayloadRow(row2);
-      if (!pp) continue;
-      if (String(pp.assignedTo || '') === String(uid)) mineIds.add(Number(pp.id));
+    for (const otroUid of otros) {
+      await sincronizarRutaMensajeroConservandoOrden(otroUid);
     }
-    const route = orderIndex.map((x) => Number(x)).filter((x) => Number.isFinite(x) && mineIds.has(x));
-    await setMeta(`route_u${uid}`, JSON.stringify(route));
+    await sincronizarRutaMensajeroConservandoOrden(uid);
 
     res.json({ ok: true, assignedTo: String(uid), count: orderIds.length });
   })
@@ -1348,7 +1444,9 @@ app.patch(
       return;
     }
     const filtered = routeIds.map((x) => Number(x)).filter((x) => Number.isFinite(x));
-    await setMeta(`route_u${userId}`, JSON.stringify(filtered));
+    await escribirRutaMensajero(userId, filtered);
+    const prevRev = await leerRutaRevMensajero(userId);
+    await escribirRutaRevMensajero(userId, prevRev + 1);
 
     const notice = {
       at: Date.now(),

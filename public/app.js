@@ -49,8 +49,10 @@ let syncPedidosEnCurso = false;
 let syncPedidosRepetir = false;
 const PEDIDOS_SYNC_PENDING_KEY = 'deliveryPedidosSyncPending_v1';
 const PEDIDOS_REV_KEY = 'deliveryPedidosRev_v1';
+const RUTA_REV_KEY = 'deliveryRutaRev_v1';
 /** Revisión local monotónica: evita que un PUT viejo gane a uno nuevo. */
 let pedidosLocalRev = 0;
+let rutaLocalRev = 0;
 /** Lista de mensajeros para asignación (solo admin). */
 let listaMensajerosCache = [];
 
@@ -268,6 +270,34 @@ function getPedidosRevKey() {
   return `${PEDIDOS_REV_KEY}_${uid}`;
 }
 
+function getRutaRevKey() {
+  const uid = sesionUsuario?.id || getAuthActiveUserId();
+  if (!uid) return RUTA_REV_KEY;
+  return `${RUTA_REV_KEY}_${uid}`;
+}
+
+function cargarRutaLocalRev() {
+  try {
+    rutaLocalRev = Math.max(0, Math.floor(Number(localStorage.getItem(getRutaRevKey()) || '0') || 0));
+  } catch (_e) {
+    rutaLocalRev = 0;
+  }
+  return rutaLocalRev;
+}
+
+function guardarRutaLocalRev(n) {
+  rutaLocalRev = Math.max(0, Math.floor(Number(n) || 0));
+  try {
+    localStorage.setItem(getRutaRevKey(), String(rutaLocalRev));
+  } catch (_e) {}
+  return rutaLocalRev;
+}
+
+function bumpRutaLocalRev() {
+  cargarRutaLocalRev();
+  return guardarRutaLocalRev(rutaLocalRev + 1);
+}
+
 function hayPedidosSyncPendiente() {
   try {
     return localStorage.getItem(getPedidosSyncPendingKey()) === '1';
@@ -416,8 +446,7 @@ function configurarRefrescoPedidosMensajero() {
     if (!esSesionMensajero() || !appEstaOnline()) return;
     if (document.visibilityState === 'hidden') return;
     if (hayAlgunModalAbierto()) return;
-    // No pisar el orden mientras se está guardando o el usuario acaba de mover la ruta.
-    if (hayPedidosSyncPendiente() || syncPedidosEnCurso) return;
+    if (syncPedidosEnCurso) return;
     const antes = pedidos.map((p) => Number(p.id)).join(',');
     refrescarPedidosDesdeApi()
       .then(() => {
@@ -427,7 +456,6 @@ function configurarRefrescoPedidosMensajero() {
         redibujarRutaDebounced(80);
         const idsAntes = antes.split(',').filter(Boolean).sort().join(',');
         const idsDespues = despues.split(',').filter(Boolean).sort().join(',');
-        // Altas o bajas de pedidos: actualizar pines sin reencuadrar (el zoom del usuario se queda).
         if (idsAntes !== idsDespues) actualizarMarcadores({ conservarVista: true });
       })
       .catch((e) => console.error(e));
@@ -487,10 +515,18 @@ async function syncPedidosAlServidor() {
             body: JSON.stringify({ orders, orderIndex, clientRevision: revAlEnviar }),
           });
         } else {
-          await apiJson('/api/orders/messenger', {
+          const rutaResp = await apiJson('/api/orders/messenger', {
             method: 'PUT',
-            body: JSON.stringify({ orders, orderIndex }),
+            body: JSON.stringify({
+              orders,
+              orderIndex,
+              routeRevision: rutaLocalRev || cargarRutaLocalRev(),
+            }),
           });
+          if (rutaResp && rutaResp.routeRevision != null) {
+            const srv = Math.max(0, Math.floor(Number(rutaResp.routeRevision) || 0));
+            if (srv > 0) guardarRutaLocalRev(Math.max(rutaLocalRev || cargarRutaLocalRev(), srv));
+          }
         }
       } catch (e) {
         if (e && e.code === 'STALE_ORDERS') {
@@ -610,24 +646,24 @@ async function refrescarPedidosDesdeApi() {
     return;
   }
 
-  // Mensajero: el admin define qué pedidos existen. El orden de la ruta es local
-  // y no se reemplaza por el del servidor (un refresco a mitad del zoom lo devolvía atrás).
-  const revAntes = pedidosLocalRev || cargarPedidosLocalRev();
+  // Mensajero: el orden oficial de la ruta está en el servidor (PC y celular deben coincidir).
+  // Si hay un reorden local más nuevo que aún no se subió, se conserva y lo nuevo va al final.
   const data = await apiJson('/api/orders', { method: 'GET' });
   const delServidor = deduplicarPedidosPorId(
     (Array.isArray(data.orders) ? data.orders : []).map(normalizarPedidoEnMemoria)
   );
-  const revAhora = pedidosLocalRev || cargarPedidosLocalRev();
-  const tocoOrdenLocal = hayPedidosSyncPendiente() || syncPedidosEnCurso || revAhora !== revAntes;
-  const adminReordeno = !tocoOrdenLocal && routeNoticeEsNuevo(data);
-  if (adminReordeno) {
-    aplicarPedidosDesdeServidor(delServidor);
-    marcarPedidosSyncPendiente(false);
-    avisarCambioOrdenSiHaceFalta(data);
+  const serverRutaRev = Math.max(0, Math.floor(Number(data.routeRevision || 0) || 0));
+  const localRutaRev = rutaLocalRev || cargarRutaLocalRev();
+  const reordenLocalMasNuevo =
+    (hayPedidosSyncPendiente() || syncPedidosEnCurso) && localRutaRev > serverRutaRev;
+  if (reordenLocalMasNuevo) {
+    fijarPedidosEnMemoria(fusionarPedidosMensajeroConservandoOrden(delServidor, true));
     return;
   }
-  fijarPedidosEnMemoria(fusionarPedidosMensajeroConservandoOrden(delServidor, tocoOrdenLocal));
-  if (!tocoOrdenLocal) marcarPedidosSyncPendiente(false);
+  aplicarPedidosDesdeServidor(delServidor);
+  guardarRutaLocalRev(Math.max(localRutaRev, serverRutaRev));
+  marcarPedidosSyncPendiente(false);
+  avisarCambioOrdenSiHaceFalta(data);
 }
 
 function escapeHtmlAttr(s) {
@@ -2591,6 +2627,7 @@ function guardarPedidos() {
   guardarCachePedidos();
   if (!sesionUsuario) return;
   bumpPedidosLocalRev();
+  if (esSesionMensajero()) bumpRutaLocalRev();
   marcarPedidosSyncPendiente(true);
   if (syncPedidosEnCurso) {
     syncPedidosRepetir = true;
@@ -3137,6 +3174,7 @@ async function asignarPedidoDesdeSelect(selectEl) {
   selectEl.disabled = true;
   await mostrarLoadingYEsperarPintado(mensajeCarga);
   try {
+    if (hayPedidosSyncPendiente()) await forzarSyncPedidosAhora();
     await apiJson(`/api/orders/${pedidoId}/assign`, {
       method: 'PATCH',
       body: JSON.stringify({ userId }),
@@ -3179,6 +3217,7 @@ async function asignarActivosBulkDesdeBarra() {
   if (bulkBtn) bulkBtn.disabled = true;
   await mostrarLoadingYEsperarPintado(mensajeCarga);
   try {
+    if (hayPedidosSyncPendiente()) await forzarSyncPedidosAhora();
     await apiJson('/api/orders/assign-bulk', {
       method: 'POST',
       body: JSON.stringify({ userId: uid, orderIds }),
@@ -7664,6 +7703,7 @@ function cerrarModalQrPedidos() {
 function cargarPedidosDesdeLocalStorage() {
   migrarCachePedidosDesdeClavesAntiguas();
   cargarPedidosLocalRev();
+  cargarRutaLocalRev();
   const raw = cargarCachePedidos();
   pedidos = deduplicarPedidosPorId((raw || []).map(normalizarPedidoEnMemoria));
   if (pedidos.length > 0) {
