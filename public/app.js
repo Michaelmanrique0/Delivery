@@ -21,6 +21,8 @@ const CACHE_PEDIDOS_LEGACY_KEY = 'cachePedidos_v1';
 const AUTH_TOKEN_LEGACY_KEY = 'deliveryAuthToken';
 /** Usuario cuya sesión está activa en esta pestaña/navegador. */
 const AUTH_ACTIVE_USER_KEY = 'deliveryAuthActiveUserId';
+/** Usuario de ESTA pestaña: al recargar no debe saltar al de otra cuenta. */
+const AUTH_TAB_USER_SESSION_KEY = 'deliveryAuthTabUserId';
 /** Id del usuario dueño del token activo (redundante con AUTH_ACTIVE_USER_KEY). */
 const AUTH_USER_ID_KEY = 'deliveryAuthUserId';
 /** Copia local de la sesión para entrar sin internet. */
@@ -73,31 +75,50 @@ function appEstaOnline() {
   return typeof navigator === 'undefined' || navigator.onLine !== false;
 }
 
+function claveSesionUsuarioCache(userId) {
+  if (userId == null || userId === '') return SESION_USUARIO_CACHE_KEY;
+  return `${SESION_USUARIO_CACHE_KEY}_${userId}`;
+}
+
+function payloadSesionUsuarioCache(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    role: user.role,
+    puedeModificarValor: !!user.puedeModificarValor,
+  };
+}
+
 function guardarSesionUsuarioCache(user) {
   try {
     if (!user || user.id == null) {
+      const uid = getAuthTabUserId() || getAuthActiveUserIdFromStorage();
+      if (uid) localStorage.removeItem(claveSesionUsuarioCache(uid));
       localStorage.removeItem(SESION_USUARIO_CACHE_KEY);
       return;
     }
-    localStorage.setItem(
-      SESION_USUARIO_CACHE_KEY,
-      JSON.stringify({
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        puedeModificarValor: !!user.puedeModificarValor,
-      })
-    );
+    const payload = JSON.stringify(payloadSesionUsuarioCache(user));
+    localStorage.setItem(claveSesionUsuarioCache(user.id), payload);
+    localStorage.setItem(SESION_USUARIO_CACHE_KEY, payload);
   } catch (_e) {}
 }
 
 function cargarSesionUsuarioCache() {
   try {
+    const uid = getAuthTabUserId() || getAuthActiveUserIdFromStorage();
+    if (uid) {
+      const rawUid = localStorage.getItem(claveSesionUsuarioCache(uid));
+      if (rawUid) {
+        const u = JSON.parse(rawUid);
+        if (u && u.id != null && String(u.id) === String(uid)) return u;
+      }
+    }
     const raw = localStorage.getItem(SESION_USUARIO_CACHE_KEY);
     if (!raw) return null;
     const u = JSON.parse(raw);
     if (!u || u.id == null) return null;
+    if (uid && String(u.id) !== String(uid)) return null;
     return u;
   } catch (_e) {
     return null;
@@ -127,15 +148,32 @@ function leerUsuarioBasicoDesdeToken(token) {
 /** Restaura sesión local sin borrar el token. El cierre solo ocurre con el botón Salir. */
 async function entrarConSesionLocalSiHayToken(token) {
   if (!token) return false;
+  const tabId = getAuthTabUserId();
   const cachedUser = cargarSesionUsuarioCache();
+  const fromJwt = leerUsuarioBasicoDesdeToken(token);
+  const mismoUsuario = (a, b) => a != null && b != null && String(a) === String(b);
+
+  if (tabId) {
+    if (fromJwt && mismoUsuario(fromJwt.id, tabId)) {
+      await entrarAppConSesion(
+        cachedUser && mismoUsuario(cachedUser.id, tabId) ? { ...fromJwt, ...cachedUser } : fromJwt
+      );
+      return true;
+    }
+    if (cachedUser && mismoUsuario(cachedUser.id, tabId)) {
+      await entrarAppConSesion(cachedUser);
+      return true;
+    }
+    return false;
+  }
+
   const cachedUid = getAuthUserId() || (cachedUser ? String(cachedUser.id) : '');
-  if (cachedUser && cachedUid && String(cachedUser.id) === cachedUid) {
+  if (cachedUser && cachedUid && mismoUsuario(cachedUser.id, cachedUid)) {
     await entrarAppConSesion(cachedUser);
     return true;
   }
-  const fromJwt = leerUsuarioBasicoDesdeToken(token);
   if (fromJwt) {
-    if (cachedUser && String(cachedUser.id) === String(fromJwt.id)) {
+    if (cachedUser && mismoUsuario(cachedUser.id, fromJwt.id)) {
       await entrarAppConSesion({ ...fromJwt, ...cachedUser });
     } else {
       await entrarAppConSesion(fromJwt);
@@ -196,12 +234,34 @@ async function reintentarSyncTrasRecuperarConexion() {
   }
 }
 
-function getAuthActiveUserId() {
+function getAuthTabUserId() {
+  try {
+    return sessionStorage.getItem(AUTH_TAB_USER_SESSION_KEY) || '';
+  } catch (_e) {
+    return '';
+  }
+}
+
+function setAuthTabUserId(userId) {
+  try {
+    if (userId != null && userId !== '') {
+      sessionStorage.setItem(AUTH_TAB_USER_SESSION_KEY, String(userId));
+    } else {
+      sessionStorage.removeItem(AUTH_TAB_USER_SESSION_KEY);
+    }
+  } catch (_e) {}
+}
+
+function getAuthActiveUserIdFromStorage() {
   try {
     return localStorage.getItem(AUTH_ACTIVE_USER_KEY) || '';
   } catch (_e) {
     return '';
   }
+}
+
+function getAuthActiveUserId() {
+  return getAuthTabUserId() || getAuthActiveUserIdFromStorage();
 }
 
 function getAuthToken() {
@@ -223,12 +283,17 @@ function setAuthToken(token, userId) {
       localStorage.setItem(authTokenStorageKey(uid), token);
       localStorage.setItem(AUTH_ACTIVE_USER_KEY, uid);
       localStorage.setItem(AUTH_USER_ID_KEY, uid);
+      setAuthTabUserId(uid);
       localStorage.removeItem(AUTH_TOKEN_LEGACY_KEY);
     } else {
-      const activeId = getAuthActiveUserId();
-      if (activeId) localStorage.removeItem(authTokenStorageKey(activeId));
-      localStorage.removeItem(AUTH_ACTIVE_USER_KEY);
-      localStorage.removeItem(AUTH_USER_ID_KEY);
+      const tabId = getAuthTabUserId() || getAuthActiveUserIdFromStorage();
+      if (tabId) localStorage.removeItem(authTokenStorageKey(tabId));
+      const storedActive = getAuthActiveUserIdFromStorage();
+      if (!storedActive || storedActive === tabId) {
+        localStorage.removeItem(AUTH_ACTIVE_USER_KEY);
+        localStorage.removeItem(AUTH_USER_ID_KEY);
+      }
+      setAuthTabUserId('');
       localStorage.removeItem(AUTH_TOKEN_LEGACY_KEY);
     }
   } catch (_e) {}
@@ -357,6 +422,7 @@ async function apiJson(path, options = {}) {
     err.status = res.status;
     if (data && data.code) err.code = data.code;
     if (data && data.detail) err.detail = data.detail;
+    if (data && data.lastRevision != null) err.lastRevision = data.lastRevision;
     throw err;
   }
   return data;
@@ -443,10 +509,11 @@ function configurarRefrescoPedidosMensajero() {
   if (configurarRefrescoPedidosMensajero._listo) return;
   configurarRefrescoPedidosMensajero._listo = true;
   window.setInterval(() => {
-    if (!esSesionMensajero() || !appEstaOnline()) return;
+    if (!sesionUsuario || !appEstaOnline()) return;
     if (document.visibilityState === 'hidden') return;
     if (hayAlgunModalAbierto()) return;
     if (syncPedidosEnCurso) return;
+    if (hayPedidosSyncPendiente()) return;
     const antes = pedidos.map((p) => Number(p.id)).join(',');
     refrescarPedidosDesdeApi()
       .then(() => {
@@ -530,9 +597,24 @@ async function syncPedidosAlServidor() {
         }
       } catch (e) {
         if (e && e.code === 'STALE_ORDERS') {
-          bumpPedidosLocalRev();
-          syncPedidosRepetir = true;
-          continue;
+          // Otra sesión ya guardó el catálogo (p. ej. borró pedidos). No reenviar esta lista vieja.
+          try {
+            const data = await apiJson('/api/orders', { method: 'GET' });
+            aplicarPedidosDesdeServidor(data.orders);
+            const srvRev = Number(e.lastRevision || data.clientRevision || 0) || 0;
+            if (srvRev > 0) {
+              pedidosLocalRev = srvRev;
+              try {
+                localStorage.setItem(getPedidosRevKey(), String(srvRev));
+              } catch (_e) {}
+            }
+            marcarPedidosSyncPendiente(false);
+            renderPedidos();
+            actualizarMarcadores();
+          } catch (_e2) {
+            console.error(_e2);
+          }
+          return;
         }
         throw e;
       }
@@ -628,19 +710,21 @@ async function refrescarPedidosDesdeApi() {
   if (esSesionAdmin()) {
     if (hayPedidosSyncPendiente()) {
       await syncPedidosAlServidor();
-      return;
+      if (hayPedidosSyncPendiente()) return;
     }
     const data = await apiJson('/api/orders', { method: 'GET' });
     if (hayPedidosSyncPendiente()) return;
-    const serverRev = Number(data.clientRevision || 0) || 0;
-    const localRev = pedidosLocalRev || cargarPedidosLocalRev();
-    // Solo el admin puede subir su lista local si el servidor quedó atrás.
-    if (localRev > 0 && serverRev < localRev) {
-      marcarPedidosSyncPendiente(true);
-      await syncPedidosAlServidor();
-      return;
-    }
     aplicarPedidosDesdeServidor(data.orders);
+    const serverRev = Number(data.clientRevision || 0) || 0;
+    if (serverRev > 0) {
+      const localRev = pedidosLocalRev || cargarPedidosLocalRev();
+      if (serverRev > localRev) {
+        pedidosLocalRev = serverRev;
+        try {
+          localStorage.setItem(getPedidosRevKey(), String(serverRev));
+        } catch (_e) {}
+      }
+    }
     marcarPedidosSyncPendiente(false);
     avisarCambioOrdenSiHaceFalta(data);
     return;
@@ -3138,23 +3222,38 @@ function htmlOpcionesMensajerosSelect(pedido) {
   return html;
 }
 
+function pintarSelectsMensajerosEnUI() {
+  const bulk = document.getElementById('bulkAssignSelect');
+  if (bulk) {
+    const prev = bulk.value;
+    bulk.innerHTML =
+      '<option value="">Elegir mensajero…</option>' +
+      listaMensajerosCache
+        .map((m) => `<option value="${m.id}">${escapeHtmlTexto(m.username)}</option>`)
+        .join('');
+    if (prev && [...bulk.options].some((o) => o.value === prev)) bulk.value = prev;
+  }
+}
+
 async function cargarMensajerosParaAsignacion() {
   if (!esSesionAdmin()) return;
-  try {
-    const data = await apiJson('/api/users', { method: 'GET' });
-    listaMensajerosCache = (data.users || []).filter((u) => u.role === 'mensajero');
-    const bulk = document.getElementById('bulkAssignSelect');
-    if (bulk) {
-      bulk.innerHTML =
-        '<option value="">Elegir mensajero…</option>' +
-        listaMensajerosCache
-          .map((m) => `<option value="${m.id}">${escapeHtmlTexto(m.username)}</option>`)
-          .join('');
+  let ultimoError = null;
+  for (let intento = 0; intento < 3; intento++) {
+    try {
+      const data = await apiJson('/api/users', { method: 'GET' });
+      listaMensajerosCache = (data.users || []).filter((u) => u.role === 'mensajero');
+      const habiaSelectsVacios = [...document.querySelectorAll('.pedido-asignacion-select')].some(
+        (sel) => sel.options.length <= 1
+      );
+      pintarSelectsMensajerosEnUI();
+      if (habiaSelectsVacios && listaMensajerosCache.length) renderPedidos();
+      return;
+    } catch (e) {
+      ultimoError = e;
+      await new Promise((r) => setTimeout(r, 400 * (intento + 1)));
     }
-  } catch (e) {
-    console.error(e);
-    listaMensajerosCache = [];
   }
+  if (ultimoError) console.error(ultimoError);
 }
 
 async function asignarPedidoDesdeSelect(selectEl) {
@@ -3920,7 +4019,27 @@ function handleDragEnd() {
 
 // --- Gestión de pedidos ---
 
-function eliminarPedido(index) {
+function resumenAsignacionesParaBorrar(lista) {
+  const asignados = (lista || []).filter((p) => p && uidPedidoAsignado(p));
+  if (asignados.length === 0) return '';
+  const porNombre = new Map();
+  for (const p of asignados) {
+    const uid = uidPedidoAsignado(p);
+    const nom = nombreMensajeroPorId(uid) || `el mensajero (id ${uid})`;
+    if (!porNombre.has(nom)) porNombre.set(nom, []);
+    porNombre.get(nom).push(`#${p.id}`);
+  }
+  const frases = [...porNombre.entries()].map(([nom, ids]) => {
+    if (ids.length === 1) return `El pedido ${ids[0]} está asignado a ${nom}`;
+    return `Los pedidos ${ids.join(', ')} están asignados a ${nom}`;
+  });
+  return (
+    frases.join('. ') +
+    '.\n\nSi los eliminas de todas formas, desaparecerán para todos los administradores y para el mensajero.'
+  );
+}
+
+async function eliminarPedido(index) {
   if (sesionUsuario && !esSesionAdmin()) {
     mostrarToast('Solo un administrador puede eliminar pedidos.', 'warning');
     return;
@@ -3928,9 +4047,18 @@ function eliminarPedido(index) {
   const pedido = pedidos[index];
   if (!pedido) return;
   const idRef = Number(pedido.id);
+  if (!listaMensajerosCache.length) {
+    try {
+      await cargarMensajerosParaAsignacion();
+    } catch (_e) {}
+  }
+  const avisoAsignado = resumenAsignacionesParaBorrar([pedido]);
+  const texto = avisoAsignado
+    ? `¿Eliminar el pedido #${idRef}?\n\n${avisoAsignado}`
+    : `¿Estás seguro de eliminar el pedido #${idRef}?`;
   mostrarModalDecision({
     titulo: 'Eliminar pedido',
-    texto: `¿Estás seguro de eliminar el pedido #${idRef}?`,
+    texto,
     textoConfirmar: 'Eliminar',
     textoCancelar: 'Cancelar',
     claseConfirmar: 'btn-danger',
@@ -3943,7 +4071,6 @@ function eliminarPedido(index) {
       renderPedidos();
       actualizarMarcadores();
       void forzarSyncPedidosAhora().catch((e) => console.error(e));
-      mostrarToast(`Pedido #${idRef} eliminado.`, 'success');
     },
     onCancelar: () => {}
   });
@@ -4102,15 +4229,24 @@ function reactivarPedidoCancelado(index) {
   actualizarMarcadores();
 }
 
-function eliminarTodos() {
+async function eliminarTodos() {
   if (sesionUsuario && !esSesionAdmin()) {
     mostrarToast('Solo un administrador puede vaciar la lista.', 'warning');
     return;
   }
+  if (!listaMensajerosCache.length) {
+    try {
+      await cargarMensajerosParaAsignacion();
+    } catch (_e) {}
+  }
+  const avisoAsignado = resumenAsignacionesParaBorrar(pedidos);
+  const texto = avisoAsignado
+    ? `¿Eliminar TODOS los pedidos?\n\n${avisoAsignado}`
+    : '¿Estás seguro de eliminar TODOS los pedidos? Esta acción no se puede deshacer.';
   mostrarModalDecision({
     titulo: 'Eliminar todos los pedidos',
-    texto: '¿Estás seguro de eliminar TODOS los pedidos? Esta acción no se puede deshacer.',
-    textoConfirmar: 'Eliminar todo',
+    texto,
+    textoConfirmar: 'Eliminar',
     textoCancelar: 'Cancelar',
     claseConfirmar: 'btn-danger',
     mostrarSecundario: false,
@@ -4130,7 +4266,6 @@ function eliminarTodos() {
         }
       } catch (_e) {}
       void forzarSyncPedidosAhora().catch((e) => console.error(e));
-      mostrarToast('Todos los pedidos fueron eliminados.', 'success');
     },
     onCancelar: () => {}
   });
@@ -7735,11 +7870,7 @@ async function iniciarApp() {
     // primero se suben y se conservan; no se pisan con el servidor.
     cargarPedidosDesdeLocalStorage();
     try {
-      if (esSesionAdmin() && hayPedidosSyncPendiente()) {
-        await forzarSyncPedidosAhora();
-      } else {
-        await refrescarPedidosDesdeApi();
-      }
+      await refrescarPedidosDesdeApi();
     } catch (e) {
       console.error(e);
       if (pedidos.length === 0) cargarPedidosDesdeLocalStorage();
@@ -7820,8 +7951,8 @@ async function cerrarSesionApp() {
   } catch (e) {
     console.error(e);
   }
-  setAuthToken('');
   guardarSesionUsuarioCache(null);
+  setAuthToken('');
   sesionUsuario = null;
   try {
     sessionStorage.removeItem(AUTH_TAB_SESSION_KEY);
@@ -7848,6 +7979,7 @@ async function entrarAppConSesion(user) {
 
   sesionUsuario = user;
   guardarSesionUsuarioCache(user);
+  setAuthTabUserId(user.id);
   const tokenActual = getAuthToken();
   if (tokenActual) setAuthToken(tokenActual, user.id);
 
@@ -9368,6 +9500,11 @@ async function iniciarFlujoAuth() {
   if (token && !enVistaResetUrl) {
     try {
       const me = await apiJson('/api/me', { method: 'GET' });
+      const tabId = getAuthTabUserId();
+      if (tabId && String(me.user.id) !== String(tabId)) {
+        const entroLocal = await entrarConSesionLocalSiHayToken(token);
+        if (entroLocal) return;
+      }
       migrarTokenLegacySiHaceFalta(me.user.id);
       setAuthToken(token, me.user.id);
       await entrarAppConSesion(me.user);
@@ -9473,25 +9610,9 @@ function sincronizarSesionDesdeOtraPestana() {
   if (!sesionUsuario) return;
   const token = getAuthToken();
   if (!token) {
-    /* Solo si otra pestaña cerró sesión con el botón Salir (token borrado). */
+    /* Solo si se borró el token de ESTA pestaña. */
     cerrarSesionApp();
-    return;
   }
-  void (async () => {
-    try {
-      const me = await apiJson('/api/me', { method: 'GET' });
-      if (String(me.user.id) === String(sesionUsuario.id)) return;
-      setAuthToken(token, me.user.id);
-      await entrarAppConSesion(me.user);
-      mostrarToast(
-        `Sesión actualizada: ahora estás como ${me.user.username} (${me.user.role === 'admin' ? 'Administrador' : 'Mensajero'}).`,
-        'info',
-        8000
-      );
-    } catch (_e) {
-      /* Fallo de red/API: mantener la sesión actual; no cerrar ni recargar. */
-    }
-  })();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

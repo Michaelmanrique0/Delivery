@@ -1245,12 +1245,14 @@ app.put(
       const idsVigentes = orderIndex.map((oid) => Number(oid)).filter(Number.isFinite);
       await setMeta('order_index', JSON.stringify(idsVigentes));
       await podarRutasMensajeros(idsVigentes);
-      if (Number.isFinite(clientRev) && clientRev > 0) {
-        await setMeta('orders_client_rev_v1', String(Math.floor(clientRev)));
-      }
+      const nextRev = Math.max(
+        Number.isFinite(clientRev) && clientRev > 0 ? Math.floor(clientRev) : 0,
+        lastRev + 1
+      );
+      await setMeta('orders_client_rev_v1', String(nextRev));
       res.json(
         await buildOrdersResponseForUser(req.user, {
-          clientRevision: Number.isFinite(clientRev) && clientRev > 0 ? Math.floor(clientRev) : lastRev,
+          clientRevision: nextRev,
         })
       );
     });
