@@ -637,8 +637,28 @@ async function syncPedidosAlServidor() {
   }
 }
 
+function preservarNotificacionEnCaminoLocal(listaNueva) {
+  const prev = new Map((pedidos || []).map((p) => [Number(p.id), p]));
+  return (listaNueva || []).map((p) => {
+    const loc = prev.get(Number(p.id));
+    if (!loc) return p;
+    if (!loc.notificadoEnCamino) return p;
+    return {
+      ...p,
+      notificadoEnCamino: true,
+      telefonosNotificadosEnCamino:
+        Array.isArray(p.telefonosNotificadosEnCamino) && p.telefonosNotificadosEnCamino.length
+          ? p.telefonosNotificadosEnCamino
+          : loc.telefonosNotificadosEnCamino || [],
+    };
+  });
+}
+
 function aplicarPedidosDesdeServidor(raw) {
-  pedidos = deduplicarPedidosPorId((Array.isArray(raw) ? raw : []).map(normalizarPedidoEnMemoria));
+  const normalizados = deduplicarPedidosPorId(
+    (Array.isArray(raw) ? raw : []).map(normalizarPedidoEnMemoria)
+  );
+  pedidos = preservarNotificacionEnCaminoLocal(normalizados);
   if (pedidos.length > 0) {
     nextPedidoId = Math.max(...pedidos.map((p) => p.id), 0) + 1;
   } else {
@@ -673,7 +693,20 @@ function fusionarPedidosMensajeroConservandoOrden(delServidor, conservarObjetosL
     const id = Number(p && p.id);
     if (!Number.isFinite(id) || vistos.has(id) || !porServidor.has(id)) continue;
     vistos.add(id);
-    out.push(conservarObjetosLocales ? normalizarPedidoEnMemoria(p) : porServidor.get(id));
+    if (conservarObjetosLocales) {
+      out.push(normalizarPedidoEnMemoria(p));
+    } else {
+      const remoto = porServidor.get(id);
+      out.push(
+        p.notificadoEnCamino && remoto && !remoto.notificadoEnCamino
+          ? {
+              ...remoto,
+              notificadoEnCamino: true,
+              telefonosNotificadosEnCamino: p.telefonosNotificadosEnCamino || [],
+            }
+          : remoto
+      );
+    }
   }
   for (const p of remotos) {
     const id = Number(p.id);
@@ -3470,7 +3503,7 @@ function crearTarjetaPedido(pedido, index) {
         ? `<div class="pedido-asignacion"><label class="pedido-asignacion-label" for="asignSel_${pedido.id}"><i class="fa-solid fa-motorcycle"></i> Asignar a mensajero</label><select id="asignSel_${pedido.id}" class="pedido-asignacion-select" data-asign-pedido-id="${pedido.id}" data-prev-value="${escapeHtmlAttr(String(pedido.assignedTo || ''))}" onchange="asignarPedidoDesdeSelect(this)">${htmlOpcionesMensajerosSelect(pedido)}</select></div>`
         : ''
     }
-    ${etapaActual === 'enDestino' ? `
+    ${etapaActual === 'enDestino' || etapaActual === 'enRuta' ? `
     <div class="pedido-tools">
       <details class="pedido-dropdown">
         <summary class="btn-info"><i class="fa-solid fa-address-book"></i> Contacto</summary>
@@ -5548,6 +5581,8 @@ function configurarRetornoNotificarClientePorteria() {
   const avanzarTrasRetornoReal = () => {
     if (hayModalBloqueandoNotificacionCliente()) return;
 
+    if (ofrecerEnrutarTrasNotificacionSiPendiente()) return;
+
     const flujo = flujoPostCierrePedido;
     if (flujo) {
       if (flujo.fase === 'esperando_retorno_tienda') {
@@ -6151,7 +6186,7 @@ function manejarNavegacionConNotificacion(index, pedidoId, tipoNavegacion) {
     texto: `El pedido #${pedidoId} no ha sido notificado en camino.\n¿Quieres notificar al cliente antes de navegar?`,
     textoConfirmar: 'Si, notificar y navegar',
     claseConfirmar: 'btn-notify',
-    textoSecundario: 'No, solo navegar',
+    textoSecundario: 'Solo enrutar',
     claseSecundario: 'btn-route',
     textoCancelar: 'Cancelar',
     onConfirmar: () => {
@@ -6375,18 +6410,7 @@ function notificarSiguientePedido(excluirPedidoId) {
     mostrarSecundario: false,
     textoCancelar: 'Cerrar',
     onConfirmar: () => notificarEnCamino(indexSiguiente, siguiente.id, {
-      onSuccess: () => {
-        mostrarModalDecision({
-          titulo: 'Pedido notificado',
-          texto: `El pedido #${siguiente.id} fue notificado.\n¿Quieres enrutar ahora?`,
-          textoConfirmar: 'Enrutar',
-          claseConfirmar: 'btn-route',
-          mostrarSecundario: false,
-          textoCancelar: 'Cerrar',
-          onConfirmar: () => enrutarConApps(indexSiguiente, siguiente.id),
-          onCancelar: () => {}
-        });
-      }
+      abrirEnrutarDespues: true,
     }),
     onCancelar: () => {}
   });
@@ -6437,8 +6461,21 @@ function abrirWhatsAppNotificarEnCamino(tel, mensaje) {
   abrirWhatsAppConTexto(wa, mensaje);
 }
 
+let enrutarTrasNotificacionPendiente = null;
+
+function programarEnrutarTrasNotificacion(indexFinal, pedidoId) {
+  enrutarTrasNotificacionPendiente = { indexFinal, pedidoId, at: Date.now() };
+}
+
+function hayModalDecisionVisible() {
+  const el = document.getElementById('modalDecision');
+  return !!(el && el.style && el.style.display === 'flex');
+}
+
 function mostrarModalEnrutarTrasNotificacion(indexFinal, pedidoId, opciones) {
-  if (!opciones.abrirEnrutarDespues) return;
+  if (opciones && opciones.abrirEnrutarDespues === false) return;
+  if (!opciones || !opciones.abrirEnrutarDespues) return;
+  enrutarTrasNotificacionPendiente = null;
   mostrarModalDecision({
     titulo: 'Enrutar ahora',
     texto: `Pedido #${pedidoId} notificado.\n¿Quieres enrutar ahora?`,
@@ -6451,12 +6488,59 @@ function mostrarModalEnrutarTrasNotificacion(indexFinal, pedidoId, opciones) {
   });
 }
 
+function persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, tel) {
+  registrarTelefonoNotificadoEnCamino(pedidoFinal, tel);
+  completarNotificacionEnCaminoPedido(pedidoFinal);
+  guardarPedidos();
+  renderPedidos();
+}
+
 function finalizarFlujoNotificacionEnCamino(indexFinal, pedidoId, pedidoFinal, opciones) {
   completarNotificacionEnCaminoPedido(pedidoFinal);
   guardarPedidos();
   renderPedidos();
+  if (opciones && opciones.abrirEnrutarDespues) {
+    programarEnrutarTrasNotificacion(indexFinal, pedidoId);
+  }
   if (typeof opciones.onSuccess === 'function') opciones.onSuccess();
-  mostrarModalEnrutarTrasNotificacion(indexFinal, pedidoId, opciones);
+  mostrarModalEnrutarTrasNotificacion(indexFinal, pedidoId, opciones || {});
+}
+
+function ofrecerEnrutarTrasNotificacionSiPendiente() {
+  if (flujoPostCierrePedido) return false;
+  if (hayModalDecisionVisible()) return false;
+
+  let objetivo = null;
+  if (enrutarTrasNotificacionPendiente) {
+    const { pedido } = obtenerPedidoPorId(enrutarTrasNotificacionPendiente.pedidoId);
+    if (pedido) objetivo = pedido;
+  }
+  if (!objetivo) {
+    objetivo =
+      pedidos.find(
+        (p) =>
+          p &&
+          !p.entregado &&
+          !p.cancelado &&
+          !p.enCurso &&
+          !p.notificadoEnCamino &&
+          obtenerTelefonosNotificadosEnCamino(p).length > 0
+      ) || null;
+  }
+  if (!objetivo) return false;
+  if (objetivo.enCurso || objetivo.entregado || objetivo.cancelado) {
+    enrutarTrasNotificacionPendiente = null;
+    return false;
+  }
+  if (!objetivo.notificadoEnCamino && obtenerTelefonosNotificadosEnCamino(objetivo).length > 0) {
+    completarNotificacionEnCaminoPedido(objetivo);
+    guardarPedidos();
+    renderPedidos();
+  }
+  if (!objetivo.notificadoEnCamino) return false;
+  const idx = pedidos.findIndex((p) => Number(p.id) === Number(objetivo.id));
+  mostrarModalEnrutarTrasNotificacion(idx >= 0 ? idx : 0, objetivo.id, { abrirEnrutarDespues: true });
+  return true;
 }
 
 function ofrecerNotificarSegundoTelefono(indexFinal, pedidoId, pedidoFinal, opciones, mensaje) {
@@ -6475,10 +6559,11 @@ function ofrecerNotificarSegundoTelefono(indexFinal, pedidoId, pedidoFinal, opci
     claseSecundario: 'btn-info',
     mostrarCancelar: false,
     onConfirmar: () => {
+      persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, otro);
+      if (opciones && opciones.abrirEnrutarDespues) {
+        programarEnrutarTrasNotificacion(indexFinal, pedidoId);
+      }
       abrirWhatsAppNotificarEnCamino(otro, mensaje);
-      registrarTelefonoNotificadoEnCamino(pedidoFinal, otro);
-      guardarPedidos();
-      renderPedidos();
       finalizarFlujoNotificacionEnCamino(indexFinal, pedidoId, pedidoFinal, opciones);
     },
     onSecundario: () => finalizarFlujoNotificacionEnCamino(indexFinal, pedidoId, pedidoFinal, opciones),
@@ -6512,10 +6597,11 @@ function ejecutarNotificacionEnCaminoParcial(indexFinal, pedidoId, pedidoFinal, 
       claseSecundario: 'btn-info',
       mostrarCancelar: false,
       onConfirmar: () => {
+        persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, otro);
+        if (opciones && opciones.abrirEnrutarDespues) {
+          programarEnrutarTrasNotificacion(indexFinal, pedidoId);
+        }
         abrirWhatsAppNotificarEnCamino(otro, mensaje);
-        registrarTelefonoNotificadoEnCamino(pedidoFinal, otro);
-        guardarPedidos();
-        renderPedidos();
         finalizarFlujoNotificacionEnCamino(indexFinal, pedidoId, pedidoFinal, opciones);
       },
       onSecundario: () => finalizarFlujoNotificacionEnCamino(indexFinal, pedidoId, pedidoFinal, opciones),
@@ -6524,10 +6610,11 @@ function ejecutarNotificacionEnCaminoParcial(indexFinal, pedidoId, pedidoFinal, 
     return;
   }
   seleccionarTelefonoConModal(pendientes, 'Notificación', (telElegido) => {
+    persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, telElegido);
+    if (opciones && opciones.abrirEnrutarDespues) {
+      programarEnrutarTrasNotificacion(indexFinal, pedidoId);
+    }
     abrirWhatsAppNotificarEnCamino(telElegido, mensaje);
-    registrarTelefonoNotificadoEnCamino(pedidoFinal, telElegido);
-    guardarPedidos();
-    renderPedidos();
     continuarFlujoNotificacionEnCaminoTrasUno(indexFinal, pedidoId, pedidoFinal, opciones, mensaje);
   });
 }
@@ -6637,10 +6724,11 @@ async function notificarEnCamino(index, pedidoId, opciones = {}) {
   }
 
   seleccionarTelefonoConModal(tels, 'Notificación', (telElegido) => {
+    persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, telElegido);
+    if (opciones && opciones.abrirEnrutarDespues) {
+      programarEnrutarTrasNotificacion(indexFinal, pedidoId);
+    }
     abrirWhatsAppNotificarEnCamino(telElegido, mensaje);
-    registrarTelefonoNotificadoEnCamino(pedidoFinal, telElegido);
-    guardarPedidos();
-    renderPedidos();
     continuarFlujoNotificacionEnCaminoTrasUno(indexFinal, pedidoId, pedidoFinal, opciones, mensaje);
   });
 }
