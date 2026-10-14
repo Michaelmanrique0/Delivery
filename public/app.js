@@ -639,17 +639,18 @@ async function syncPedidosAlServidor() {
 
 function preservarNotificacionEnCaminoLocal(listaNueva) {
   const prev = new Map((pedidos || []).map((p) => [Number(p.id), p]));
+  const idsSesion = idsNotificadosEnCaminoSesion();
   return (listaNueva || []).map((p) => {
     const loc = prev.get(Number(p.id));
-    if (!loc) return p;
-    if (!loc.notificadoEnCamino) return p;
+    const marcadoSesion = idsSesion.has(Number(p.id));
+    if (!(loc && loc.notificadoEnCamino) && !marcadoSesion) return p;
     return {
       ...p,
       notificadoEnCamino: true,
       telefonosNotificadosEnCamino:
         Array.isArray(p.telefonosNotificadosEnCamino) && p.telefonosNotificadosEnCamino.length
           ? p.telefonosNotificadosEnCamino
-          : loc.telefonosNotificadosEnCamino || [],
+          : (loc && loc.telefonosNotificadosEnCamino) || [],
     };
   });
 }
@@ -1991,6 +1992,7 @@ function limpiarNotificacionEnCaminoPedido(pedido) {
 function completarNotificacionEnCaminoPedido(pedido) {
   if (!pedido) return;
   pedido.notificadoEnCamino = true;
+  if (pedido.id != null) marcarPedidoNotificadoEnSesion(pedido.id);
 }
 
 function seleccionarTelefonoConModal(tels, titulo, onElegir) {
@@ -3442,28 +3444,16 @@ function crearTarjetaPedido(pedido, index) {
     adminUi && pedido.cancelado
       ? `<button class="btn-success" onclick="reactivarPedidoCancelado(${index})"><i class="fa-solid fa-rotate-left"></i> Reactivar pedido</button>`
       : '';
-  const textoBotonNotificar = pedido.notificadoEnCamino
-    ? 'Volver a notificar'
-    : tieneNotificacionEnCaminoParcial(pedido)
-      ? 'Notificar al otro número'
-      : 'Notificar en camino';
   const btnNotificarHtml =
     etapaActual === 'notificar'
-      ? `<button class="btn-notify" onclick="notificarEnCamino(${index}, ${pedido.id}, { abrirEnrutarDespues: true })"><i class="fa-solid fa-bullhorn"></i> ${textoBotonNotificar}</button>`
+      ? `<button class="btn-notify" onclick="notificarEnCamino(${index}, ${pedido.id}, { abrirEnrutarDespues: true, directoWhatsApp: true })"><i class="fa-solid fa-bullhorn"></i> Notificar</button>`
       : '';
-  const btnNotificarNuevamenteHtml =
-    !pedido.entregado &&
-    !pedido.cancelado &&
-    pedido.notificadoEnCamino &&
-    etapaActual !== 'enRuta' &&
-    etapaActual !== 'enDestino'
-      ? `<button class="btn-notify" onclick="notificarEnCamino(${index}, ${pedido.id}, { forzarReenvio: true })"><i class="fa-solid fa-bullhorn"></i> Notificar nuevamente al cliente</button>`
-      : '';
+  const btnNotificarNuevamenteHtml = '';
   const btnEnrutarHtml = etapaActual === 'enrutar'
     ? `<button class="btn-route" onclick="enrutarConApps(${index}, ${pedido.id})"><i class="fa-solid fa-route"></i> Enrutar</button>`
     : '';
   const btnEnrutarNuevamenteHtml =
-    etapaActual === 'enRuta' || (etapaActual === 'notificar' && !!pedido.haSidoEnrutado)
+    etapaActual === 'enRuta'
       ? `<button class="btn-route" onclick="enrutarConApps(${index}, ${pedido.id})"><i class="fa-solid fa-route"></i> Enrutar nuevamente</button>`
       : '';
   const btnLlegueDestinoHtml = etapaActual === 'enRuta'
@@ -6175,27 +6165,11 @@ function manejarNavegacionConNotificacion(index, pedidoId, tipoNavegacion) {
   const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   if (!pedido) return;
-
-  if (pedido.notificadoEnCamino) {
-    abrirNavegacion(tipoNavegacion, indexFinal, pedidoId);
-    return;
+  if (!pedido.notificadoEnCamino) {
+    completarNotificacionEnCaminoPedido(pedido);
+    guardarPedidos();
   }
-
-  mostrarModalDecision({
-    titulo: 'Notificar al cliente',
-    texto: `El pedido #${pedidoId} no ha sido notificado en camino.\n¿Quieres notificar al cliente antes de navegar?`,
-    textoConfirmar: 'Si, notificar y navegar',
-    claseConfirmar: 'btn-notify',
-    textoSecundario: 'Solo enrutar',
-    claseSecundario: 'btn-route',
-    textoCancelar: 'Cancelar',
-    onConfirmar: () => {
-      notificarEnCamino(indexFinal, pedidoId, {
-        onSuccess: () => abrirNavegacion(tipoNavegacion, indexFinal, pedidoId)
-      });
-    },
-    onSecundario: () => abrirNavegacion(tipoNavegacion, indexFinal, pedidoId)
-  });
+  abrirNavegacion(tipoNavegacion, indexFinal, pedidoId);
 }
 
 function enrutarConMaps(index, pedidoId) {
@@ -6462,9 +6436,35 @@ function abrirWhatsAppNotificarEnCamino(tel, mensaje) {
 }
 
 let enrutarTrasNotificacionPendiente = null;
+const ENRUTAR_TRAS_NOTIF_SS_KEY = 'deliveryEnrutarTrasNotif_v1';
+const NOTIF_CAMINO_IDS_SS_KEY = 'deliveryNotifEnCaminoIds_v1';
+
+function idsNotificadosEnCaminoSesion() {
+  try {
+    const raw = sessionStorage.getItem(NOTIF_CAMINO_IDS_SS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? arr.map(Number).filter(Number.isFinite) : []);
+  } catch (_e) {
+    return new Set();
+  }
+}
+
+function marcarPedidoNotificadoEnSesion(pedidoId) {
+  const ids = idsNotificadosEnCaminoSesion();
+  ids.add(Number(pedidoId));
+  try {
+    sessionStorage.setItem(NOTIF_CAMINO_IDS_SS_KEY, JSON.stringify([...ids]));
+  } catch (_e) {}
+}
 
 function programarEnrutarTrasNotificacion(indexFinal, pedidoId) {
   enrutarTrasNotificacionPendiente = { indexFinal, pedidoId, at: Date.now() };
+  try {
+    sessionStorage.setItem(
+      ENRUTAR_TRAS_NOTIF_SS_KEY,
+      JSON.stringify(enrutarTrasNotificacionPendiente)
+    );
+  } catch (_e) {}
 }
 
 function hayModalDecisionVisible() {
@@ -6476,6 +6476,9 @@ function mostrarModalEnrutarTrasNotificacion(indexFinal, pedidoId, opciones) {
   if (opciones && opciones.abrirEnrutarDespues === false) return;
   if (!opciones || !opciones.abrirEnrutarDespues) return;
   enrutarTrasNotificacionPendiente = null;
+  try {
+    sessionStorage.removeItem(ENRUTAR_TRAS_NOTIF_SS_KEY);
+  } catch (_e) {}
   mostrarModalDecision({
     titulo: 'Enrutar ahora',
     texto: `Pedido #${pedidoId} notificado.\n¿Quieres enrutar ahora?`,
@@ -6491,6 +6494,7 @@ function mostrarModalEnrutarTrasNotificacion(indexFinal, pedidoId, opciones) {
 function persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, tel) {
   registrarTelefonoNotificadoEnCamino(pedidoFinal, tel);
   completarNotificacionEnCaminoPedido(pedidoFinal);
+  if (pedidoFinal && pedidoFinal.id != null) marcarPedidoNotificadoEnSesion(pedidoFinal.id);
   guardarPedidos();
   renderPedidos();
 }
@@ -6509,6 +6513,15 @@ function finalizarFlujoNotificacionEnCamino(indexFinal, pedidoId, pedidoFinal, o
 function ofrecerEnrutarTrasNotificacionSiPendiente() {
   if (flujoPostCierrePedido) return false;
   if (hayModalDecisionVisible()) return false;
+
+  if (!enrutarTrasNotificacionPendiente) {
+    try {
+      const raw = sessionStorage.getItem(ENRUTAR_TRAS_NOTIF_SS_KEY);
+      if (raw) enrutarTrasNotificacionPendiente = JSON.parse(raw);
+    } catch (_e) {
+      enrutarTrasNotificacionPendiente = null;
+    }
+  }
 
   let objetivo = null;
   if (enrutarTrasNotificacionPendiente) {
@@ -6688,11 +6701,12 @@ async function notificarEnCamino(index, pedidoId, opciones = {}) {
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal) return;
 
-  if (opciones.forzarReenvio) {
+  const directo = !!opciones.directoWhatsApp;
+  if (opciones.forzarReenvio && !directo) {
     limpiarNotificacionEnCaminoPedido(pedidoFinal);
   }
 
-  if (pedidoFinal.notificadoEnCamino && !opciones.forzarReenvio) {
+  if (pedidoFinal.notificadoEnCamino && !opciones.forzarReenvio && !directo) {
     mostrarModalDecision({
       titulo: 'Pedido ya notificado',
       texto: `El pedido #${pedidoId} ya fue notificado.\n¿Volver a notificar?`,
@@ -6717,19 +6731,26 @@ async function notificarEnCamino(index, pedidoId, opciones = {}) {
   }
 
   const mensaje = construirMensajeNotificarEnCamino(pedidoFinal);
+  const opts = { abrirEnrutarDespues: true, ...opciones };
+
+  if (directo) {
+    const telElegido = tels[0];
+    persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, telElegido);
+    programarEnrutarTrasNotificacion(indexFinal, pedidoId);
+    abrirWhatsAppNotificarEnCamino(telElegido, mensaje);
+    return;
+  }
 
   if (tieneNotificacionEnCaminoParcial(pedidoFinal)) {
-    ejecutarNotificacionEnCaminoParcial(indexFinal, pedidoId, pedidoFinal, opciones, mensaje);
+    ejecutarNotificacionEnCaminoParcial(indexFinal, pedidoId, pedidoFinal, opts, mensaje);
     return;
   }
 
   seleccionarTelefonoConModal(tels, 'Notificación', (telElegido) => {
     persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, telElegido);
-    if (opciones && opciones.abrirEnrutarDespues) {
-      programarEnrutarTrasNotificacion(indexFinal, pedidoId);
-    }
+    programarEnrutarTrasNotificacion(indexFinal, pedidoId);
     abrirWhatsAppNotificarEnCamino(telElegido, mensaje);
-    continuarFlujoNotificacionEnCaminoTrasUno(indexFinal, pedidoId, pedidoFinal, opciones, mensaje);
+    continuarFlujoNotificacionEnCaminoTrasUno(indexFinal, pedidoId, pedidoFinal, opts, mensaje);
   });
 }
 
@@ -7929,6 +7950,10 @@ function cargarPedidosDesdeLocalStorage() {
   cargarRutaLocalRev();
   const raw = cargarCachePedidos();
   pedidos = deduplicarPedidosPorId((raw || []).map(normalizarPedidoEnMemoria));
+  const idsSesion = idsNotificadosEnCaminoSesion();
+  for (const p of pedidos) {
+    if (idsSesion.has(Number(p.id))) p.notificadoEnCamino = true;
+  }
   if (pedidos.length > 0) {
     nextPedidoId = Math.max(...pedidos.map((p) => p.id), 0) + 1;
   } else {
@@ -8006,6 +8031,11 @@ async function iniciarApp() {
   }
 
   renderPedidos();
+  window.setTimeout(() => {
+    try {
+      ofrecerEnrutarTrasNotificacionSiPendiente();
+    } catch (_e) {}
+  }, 400);
   requestAnimationFrame(() => {
     try {
       if (!mapa) initMap();
