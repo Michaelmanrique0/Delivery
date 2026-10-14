@@ -6650,8 +6650,31 @@ function debeIncluirDisculpaDemoraNotificacionEnCamino() {
   return minutosDelDiaRelojLocal() >= 17 * 60 + 55;
 }
 
+/**
+ * Nombre para el saludo de WhatsApp. Vacío si el campo no es un nombre de persona
+ * (número, dirección o “portería”).
+ */
+function nombreClienteParaSaludoNotificacion(raw) {
+  const nombre = String(raw || '').trim();
+  if (!nombre) return '';
+  if (/\d/.test(nombre)) return '';
+  const n = nombre
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  if (n === 'porteria' || n.includes('porteria') || /porter[ií]a/i.test(nombre)) return '';
+  if (
+    /\b(calle|cll|carrera|cra|kr|avenida|av\.?|transversal|transv|diagonal|dg|manzana|mz|apartamento|apto|conjunto|urbanizacion|barrio|torre)\b/.test(
+      n
+    )
+  ) {
+    return '';
+  }
+  return nombre;
+}
+
 function construirMensajeNotificarEnCamino(pedido) {
-  const nombre = String(pedido?.nombre || '').trim() || 'cliente';
+  const nombre = nombreClienteParaSaludoNotificacion(pedido?.nombre);
   const saludo = saludoPorHoraDispositivo();
   const conDisculpa = debeIncluirDisculpaDemoraNotificacionEnCamino();
   const monto = montoACobrarParaNotificacionEnCamino(pedido);
@@ -6681,7 +6704,7 @@ function construirMensajeNotificarEnCamino(pedido) {
     'Te recuerdo que *VOY EN CAMINO* hacia tu ubicación de entrega y que *aún no he llegado*.';
 
   const partes = [
-    `${saludo}, ${nombre}`,
+    nombre ? `${saludo}, ${nombre}` : saludo,
     '',
     anuncioCamino,
     '',
@@ -6691,7 +6714,7 @@ function construirMensajeNotificarEnCamino(pedido) {
   if (bloquePago) {
     partes.push('', bloquePago);
   }
-  partes.push('', cierreCamino, '', `Gracias por tu compra, ${nombre}.`);
+  partes.push('', cierreCamino, '', nombre ? `Gracias por tu compra, ${nombre}.` : 'Gracias por tu compra.');
   return partes.join('\n');
 }
 
