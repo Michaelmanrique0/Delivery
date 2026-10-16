@@ -4328,7 +4328,7 @@ let edicionPedidoPendiente = { index: null };
 
 function asegurarModalEditarPedido() {
   let modal = document.getElementById('modalEditarPedido');
-  if (modal && document.getElementById('editarPedidoDireccion')) return modal;
+  if (modal && document.getElementById('editarPedidoNumero')) return modal;
   if (modal) {
     modal.remove();
     modal = null;
@@ -4340,8 +4340,10 @@ function asegurarModalEditarPedido() {
   modal.innerHTML = `
     <div class="modal-no-entregado-card modal-editar-pedido-card">
       <h3>Editar pedido</h3>
-      <p class="modal-editar-pedido-ayuda">Puedes cambiar el nombre, teléfono, dirección, lista de productos (una línea por producto), valor y enlace del mapa.</p>
+      <p class="modal-editar-pedido-ayuda">Puedes cambiar el número del pedido, nombre, teléfono, dirección, lista de productos (una línea por producto), valor y enlace del mapa.</p>
       <div class="modal-editar-pedido-body">
+        <label class="modal-editar-pedido-label" for="editarPedidoNumero">Número del pedido</label>
+        <input id="editarPedidoNumero" type="number" inputmode="numeric" min="1" step="1" class="modal-editar-pedido-input">
         <label class="modal-editar-pedido-label" for="editarPedidoNombre">Nombre</label>
         <input id="editarPedidoNombre" type="text" autocomplete="name" class="modal-editar-pedido-input">
         <label class="modal-editar-pedido-label" for="editarPedidoTelefono">Teléfono</label>
@@ -4385,12 +4387,35 @@ function guardarEdicionPedido() {
     return;
   }
 
+  const inputNumero = document.getElementById('editarPedidoNumero');
   const inputNombre = document.getElementById('editarPedidoNombre');
   const inputTel = document.getElementById('editarPedidoTelefono');
   const inputDir = document.getElementById('editarPedidoDireccion');
   const taProd = document.getElementById('editarPedidoProductos');
   const inputValor = document.getElementById('editarPedidoValor');
   const inputMapUrl = document.getElementById('editarPedidoMapUrl');
+
+  const idActual = Number(pedido.id);
+  const rawNumero = inputNumero ? String(inputNumero.value || '').trim() : '';
+  if (rawNumero !== '') {
+    const nuevoId = Number(rawNumero.replace(/[^\d]/g, ''));
+    if (!Number.isFinite(nuevoId) || nuevoId < 1) {
+      mostrarAvisoEnApp('Indica un número de pedido válido (entero mayor que 0).', 'Número de pedido');
+      return;
+    }
+    if (nuevoId !== idActual) {
+      const repetido = pedidos.some((p, i) => i !== index && Number(p.id) === nuevoId);
+      if (repetido) {
+        mostrarAvisoEnApp(
+          `El número #${nuevoId} está repetido: ya hay otro pedido con ese número.\n\nSi quieres cambiar a #${nuevoId}, es necesario eliminar el otro pedido o cambiarle el número.\n\nEl número de este pedido no se cambió.`,
+          'Número de pedido repetido'
+        );
+        return;
+      }
+      pedido.id = nuevoId;
+      nextPedidoId = Math.max(nextPedidoId, nuevoId + 1);
+    }
+  }
 
   pedido.nombre = inputNombre ? String(inputNombre.value || '').trim() : '';
   const telTexto = inputTel ? String(inputTel.value || '').trim() : '';
@@ -4435,12 +4460,14 @@ function editarPedido(index) {
   if (!pedido) return;
   edicionPedidoPendiente = { index };
   const modal = asegurarModalEditarPedido();
+  const inputNumero = document.getElementById('editarPedidoNumero');
   const inputNombre = document.getElementById('editarPedidoNombre');
   const inputTel = document.getElementById('editarPedidoTelefono');
   const inputDir = document.getElementById('editarPedidoDireccion');
   const taProd = document.getElementById('editarPedidoProductos');
   const inputValor = document.getElementById('editarPedidoValor');
   const inputMapUrl = document.getElementById('editarPedidoMapUrl');
+  if (inputNumero) inputNumero.value = String(pedido.id || '');
   if (inputNombre) inputNombre.value = String(pedido.nombre || '');
   if (inputTel) inputTel.value = textoTelefonosPedidoParaInput(pedido) || String(pedido.telefono || '');
   if (inputDir) inputDir.value = String(pedido.direccion || '');
@@ -4901,6 +4928,9 @@ function asegurarModalDecision() {
 
 function mostrarModalDecision(opciones) {
   const modal = asegurarModalDecision();
+  try {
+    document.body.appendChild(modal);
+  } catch (_e) {}
   const titulo = document.getElementById('modalDecisionTitulo');
   const texto = document.getElementById('modalDecisionTexto');
   const btnConfirmar = document.getElementById('modalDecisionBtnConfirmar');
