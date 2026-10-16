@@ -2226,6 +2226,33 @@ function extraerMontoValorRespaldoSinEnvio(bloque) {
   return null;
 }
 
+function esValorNombrePedidoInvalido(raw) {
+  const nombre = String(raw || '').trim();
+  if (!nombre) return true;
+  if (/^[\s:.\-_/]+$/.test(nombre)) return true;
+  const L = quitarPrefijoEmojiLinea(nombre);
+  if (!L) return true;
+  if (esLineaResiduoGuiaNoProducto(nombre) || esLineaResiduoGuiaNoProducto(L)) return true;
+  if (/n[uú]mero\s+de\s+celular/i.test(L)) return true;
+  if (/para poder contactarte/i.test(L)) return true;
+  if (/valor\s+a\s+pagar/i.test(L)) return true;
+  if (/horario\s+de\s+entrega/i.test(L)) return true;
+  if (/^(?:📲|💰|📍|🕚|🎯)/.test(nombre)) return true;
+  if (/:\s*$/.test(L) && /^(?:nombre|tel[ée]fono|celular|whatsapp|direcci[oó]n|ubicaci[oó]n|valor|producto)/i.test(L)) {
+    return true;
+  }
+  return false;
+}
+
+function limpiarNombreExtraidoPedido(raw) {
+  const nombre = String(raw || '')
+    .trim()
+    .split('\n')[0]
+    .trim();
+  if (esValorNombrePedidoInvalido(nombre)) return '';
+  return nombre;
+}
+
 function extraerCamposPedido(bloque) {
   const b = normalizarTextoParaExtraerPedido(bloque);
   const finCampo = _RE_FIN_CAMPO_PEDIDO;
@@ -2261,8 +2288,9 @@ function extraerCamposPedido(bloque) {
   const nomPatrones = [
     new RegExp(`${_RE_EMOJI_NOMBRE}[^:\\n]*:\\s*([\\s\\S]*?)${finNombre}`, 'iu'),
     // Sin dos puntos: "🙋🏻 Nombre de quien recibirá el pedido\nleonide"
+    // No capturar la siguiente etiqueta (📲 Número de celular) si el nombre viene vacío.
     new RegExp(
-      `${_RE_EMOJI_NOMBRE}\\s*(?:Nombre[^\\n]*)?\\n+\\s*([^\\n]+)`,
+      `${_RE_EMOJI_NOMBRE}\\s*(?:Nombre[^\\n]*)?\\n+\\s*(?!📲|💰|📍|Horario|Producto|N[uú]mero)([^\\n]+)`,
       'iu'
     ),
     new RegExp(`Nombre[^:\\n]*:\\s*([\\s\\S]*?)${finNombre}`, 'iu'),
@@ -2271,7 +2299,7 @@ function extraerCamposPedido(bloque) {
   for (const re of nomPatrones) {
     const m = b.match(re);
     if (m && m[1]) {
-      nombre = m[1].trim().split('\n')[0].trim();
+      nombre = limpiarNombreExtraidoPedido(m[1]);
       if (nombre) break;
     }
   }
@@ -3479,7 +3507,7 @@ function crearTarjetaPedido(pedido, index) {
         ${adminUi ? `<button class="btn-danger btn-icon-only" onclick="eliminarPedido(${index})" title="Eliminar pedido" aria-label="Eliminar pedido"><i class="fa-solid fa-trash"></i></button>` : ''}
       </div>
     </div>
-    <div class="pedido-cliente">${pedido.nombre || 'Cliente no especificado'}</div>
+    <div class="pedido-cliente">${escapeHtmlTexto(String(pedido.nombre || '').trim() || 'No especificado')}</div>
     <div class="pedido-info">
       <strong>Teléfono:</strong> ${telefonoHtml || 'No especificado'}<br>
       <strong>Dirección:</strong> ${pedido.direccion || 'No especificada'}
@@ -6657,6 +6685,7 @@ function debeIncluirDisculpaDemoraNotificacionEnCamino() {
 function nombreClienteParaSaludoNotificacion(raw) {
   const nombre = String(raw || '').trim();
   if (!nombre) return '';
+  if (esValorNombrePedidoInvalido(nombre)) return '';
   if (/\d/.test(nombre)) return '';
   const n = nombre
     .normalize('NFD')
@@ -7296,6 +7325,7 @@ function normalizarPedidoEnMemoria(p) {
   if (!p.hasOwnProperty('ajusteVueltasDigitales')) p.ajusteVueltasDigitales = false;
   if (!p.hasOwnProperty('fechaOperacion')) p.fechaOperacion = null;
   if (!p.hasOwnProperty('telefonos')) p.telefonos = [];
+  p.nombre = limpiarNombreExtraidoPedido(p.nombre);
   if (!Array.isArray(p.telefonos)) p.telefonos = normalizarTelefonosDesdeTexto(String(p.telefonos || ''));
   if (p.telefonos.length === 0 && p.telefono) {
     const legacy = String(p.telefono || '');
