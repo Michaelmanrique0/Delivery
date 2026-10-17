@@ -3128,7 +3128,7 @@ function renderPedidos() {
   pedidos.forEach((pedido, index) => {
     if (pedido.cancelado) cancelados.push({ pedido, index });
     else if (pedido.entregado) entregados.push({ pedido, index });
-    else if (pedido.enCurso) enCurso.push({ pedido, index });
+    else if (pedido.enCurso && pedido.notificadoEnCamino) enCurso.push({ pedido, index });
     else pendientes.push({ pedido, index });
   });
 
@@ -3261,9 +3261,9 @@ function cambiarVistaPedidos(vista) {
   if (!['pendientes', 'enCurso', 'entregados', 'cancelados'].includes(vista)) return;
   let n = 0;
   if (vista === 'pendientes') {
-    n = pedidos.filter((p) => !p.cancelado && !p.entregado && !p.enCurso).length;
+    n = pedidos.filter((p) => !p.cancelado && !p.entregado && !(p.enCurso && p.notificadoEnCamino)).length;
   } else if (vista === 'enCurso') {
-    n = pedidos.filter((p) => !p.cancelado && !p.entregado && p.enCurso).length;
+    n = pedidos.filter((p) => !p.cancelado && !p.entregado && p.enCurso && p.notificadoEnCamino).length;
   } else if (vista === 'entregados') {
     n = pedidos.filter((p) => p.entregado).length;
   } else if (vista === 'cancelados') {
@@ -3461,10 +3461,8 @@ function crearTarjetaPedido(pedido, index) {
     : '';
   const etapaActual = obtenerEtapaPedidoUI(pedido);
   let btnRegresarEtapaHtml = '';
-  if (etapaActual === 'enRuta') {
+  if (etapaActual === 'enRuta' || etapaActual === 'enDestino') {
     btnRegresarEtapaHtml = `<button type="button" class="btn-info" onclick="marcarPendiente(${index})"><i class="fa-solid fa-rotate-left"></i> Regresar a pendientes</button>`;
-  } else if (etapaActual === 'enDestino') {
-    btnRegresarEtapaHtml = `<button type="button" class="btn-info" onclick="marcarRegresarAEnRuta(${index})"><i class="fa-solid fa-rotate-left"></i> Regresar a en ruta</button>`;
   } else if (etapaActual === 'finalizado') {
     btnRegresarEtapaHtml = `<button type="button" class="btn-info" onclick="marcarRegresarAEnRuta(${index})" style="width:100%;"><i class="fa-solid fa-rotate-left"></i> Regresar a en ruta</button>`;
   }
@@ -3482,7 +3480,7 @@ function crearTarjetaPedido(pedido, index) {
     : '';
   const btnEnrutarNuevamenteHtml =
     etapaActual === 'enRuta'
-      ? `<button class="btn-route" onclick="enrutarConApps(${index}, ${pedido.id})"><i class="fa-solid fa-route"></i> Enrutar nuevamente</button>`
+      ? `<button class="btn-route" onclick="enrutarConApps(${index}, ${pedido.id})"><i class="fa-solid fa-route"></i> Volver a enrutar</button>`
       : '';
   const btnLlegueDestinoHtml = etapaActual === 'enRuta'
     ? `<button class="btn-primary" onclick="marcarLlegueDestino(${index}, ${pedido.id})"><i class="fa-solid fa-flag-checkered"></i> Llegué al destino</button>`
@@ -3493,6 +3491,31 @@ function crearTarjetaPedido(pedido, index) {
         <button class="btn-success" onclick="mostrarOpcionesFinalizarEntrega(${index}, ${pedido.id})"><i class="fa-solid fa-circle-check"></i> Finalizar entrega</button>
       </div>
     `
+    : '';
+  const mostrarContactoCliente = etapaActual === 'enDestino';
+  const mostrarSoportePedido = etapaActual === 'enRuta' || etapaActual === 'enDestino';
+  const bloqueHerramientasPedidoHtml = (mostrarContactoCliente || mostrarSoportePedido)
+    ? `
+    <div class="pedido-tools">
+      ${mostrarContactoCliente ? `
+      <details class="pedido-dropdown">
+        <summary class="btn-info"><i class="fa-solid fa-address-book"></i> Contacto</summary>
+        <div class="pedido-dropdown-content">
+          <button class="btn-success" onclick="contactarPedido(${index}, 'wa_call')"><i class="fa-brands fa-whatsapp"></i> Llamar por WhatsApp</button>
+          <button class="btn-success" onclick="contactarPedido(${index}, 'wa_msg')"><i class="fa-brands fa-whatsapp"></i> Mensaje por WhatsApp</button>
+          <button class="btn-info" onclick="contactarPedido(${index}, 'call')"><i class="fa-solid fa-phone"></i> Llamada normal</button>
+        </div>
+      </details>` : ''}
+      ${mostrarSoportePedido ? `
+      <details class="pedido-dropdown">
+        <summary class="btn-support"><i class="fa-solid fa-headset"></i> Soporte</summary>
+        <div class="pedido-dropdown-content">
+          <button class="btn-support" onclick="soporteLlamarWhatsApp()"><i class="fa-brands fa-whatsapp"></i> Llamar por WhatsApp</button>
+          <button class="btn-support" onclick="mostrarOpcionesMensajeSoporte(${index})"><i class="fa-solid fa-comment-dots"></i> Mensaje por WhatsApp</button>
+          <button class="btn-info" onclick="soporteLlamadaNormal()"><i class="fa-solid fa-phone"></i> Llamada normal</button>
+        </div>
+      </details>` : ''}
+    </div>`
     : '';
 
   const estadoTexto = pedido.entregado
@@ -3521,31 +3544,13 @@ function crearTarjetaPedido(pedido, index) {
         ? `<div class="pedido-asignacion"><label class="pedido-asignacion-label" for="asignSel_${pedido.id}"><i class="fa-solid fa-motorcycle"></i> Asignar a mensajero</label><select id="asignSel_${pedido.id}" class="pedido-asignacion-select" data-asign-pedido-id="${pedido.id}" data-prev-value="${escapeHtmlAttr(String(pedido.assignedTo || ''))}" onchange="asignarPedidoDesdeSelect(this)">${htmlOpcionesMensajerosSelect(pedido)}</select></div>`
         : ''
     }
-    ${etapaActual === 'enDestino' || etapaActual === 'enRuta' ? `
-    <div class="pedido-tools">
-      <details class="pedido-dropdown">
-        <summary class="btn-info"><i class="fa-solid fa-address-book"></i> Contacto</summary>
-        <div class="pedido-dropdown-content">
-          <button class="btn-success" onclick="contactarPedido(${index}, 'wa_call')"><i class="fa-brands fa-whatsapp"></i> Llamar por WhatsApp</button>
-          <button class="btn-success" onclick="contactarPedido(${index}, 'wa_msg')"><i class="fa-brands fa-whatsapp"></i> Mensaje por WhatsApp</button>
-          <button class="btn-info" onclick="contactarPedido(${index}, 'call')"><i class="fa-solid fa-phone"></i> Llamada normal</button>
-        </div>
-      </details>
-      <details class="pedido-dropdown">
-        <summary class="btn-support"><i class="fa-solid fa-headset"></i> Soporte</summary>
-        <div class="pedido-dropdown-content">
-          <button class="btn-support" onclick="soporteLlamarWhatsApp()"><i class="fa-brands fa-whatsapp"></i> Llamar por WhatsApp</button>
-          <button class="btn-support" onclick="mostrarOpcionesMensajeSoporte(${index})"><i class="fa-solid fa-comment-dots"></i> Mensaje por WhatsApp</button>
-          <button class="btn-info" onclick="soporteLlamadaNormal()"><i class="fa-solid fa-phone"></i> Llamada normal</button>
-        </div>
-      </details>
-    </div>` : ''}
+    ${bloqueHerramientasPedidoHtml}
     <div class="pedido-actions">
-      ${btnRegresarEtapaHtml ? `<div class="pedido-actions-row">${btnRegresarEtapaHtml}</div>` : ''}
       ${btnNotificarHtml ? `<div class="pedido-actions-row">${btnNotificarHtml}</div>` : ''}
       ${btnNotificarNuevamenteHtml ? `<div class="pedido-actions-row">${btnNotificarNuevamenteHtml}</div>` : ''}
       ${btnEnrutarHtml ? `<div class="pedido-actions-row">${btnEnrutarHtml}</div>` : ''}
       ${btnEnrutarNuevamenteHtml ? `<div class="pedido-actions-row">${btnEnrutarNuevamenteHtml}</div>` : ''}
+      ${btnRegresarEtapaHtml ? `<div class="pedido-actions-row">${btnRegresarEtapaHtml}</div>` : ''}
       ${btnLlegueDestinoHtml ? `<div class="pedido-actions-row">${btnLlegueDestinoHtml}</div>` : ''}
       ${bloqueAccionesDestinoHtml}
       ${btnReactivarCanceladoHtml ? `<div class="pedido-actions-row">${btnReactivarCanceladoHtml}</div>` : ''}
@@ -4144,6 +4149,7 @@ function marcarEntregado(index) {
 function marcarEnCurso(index) {
   const pedido = pedidos[index];
   if (!pedido || pedido.entregado || pedido.cancelado) return;
+  if (!pedido.notificadoEnCamino) return;
   const estabaEnCurso = !!pedido.enCurso;
   if (pedido.posicionPendiente == null) pedido.posicionPendiente = index;
   pedido.enCurso = true;
@@ -4161,7 +4167,7 @@ function marcarEnCurso(index) {
 function marcarPendiente(index) {
   const pedido = pedidos[index];
   if (!pedido || pedido.entregado || pedido.cancelado) return;
-  if (!pedido.enCurso || pedido.llegoDestino) return;
+  if (!pedido.enCurso) return;
 
   const posicionOriginal = Number.isInteger(pedido.posicionPendiente)
     ? pedido.posicionPendiente
@@ -6224,8 +6230,11 @@ function manejarNavegacionConNotificacion(index, pedidoId, tipoNavegacion) {
   const indexFinal = indexActual >= 0 ? indexActual : index;
   if (!pedido) return;
   if (!pedido.notificadoEnCamino) {
-    completarNotificacionEnCaminoPedido(pedido);
-    guardarPedidos();
+    mostrarAvisoEnApp(
+      'Todos los pedidos deben empezar por Notificar. Después de avisar al cliente aparecerá la opción para enrutar.',
+      'Notificar primero'
+    );
+    return;
   }
   abrirNavegacion(tipoNavegacion, indexFinal, pedidoId);
 }
