@@ -11,6 +11,7 @@ let rutaAbortController = null;
 let nextPedidoId = 1;
 let vistaPedidosActual = 'pendientes';
 let vistaPedidosSeleccionadaManual = false;
+let enrutarTrasNotificacionPendiente = null;
 const TELEFONO_SOPORTE = '3213153165';
 /** Pedidos en este dispositivo (sin login). */
 const CACHE_PEDIDOS_KEY = 'cachePedidos_v1';
@@ -639,19 +640,24 @@ async function syncPedidosAlServidor() {
 
 function preservarNotificacionEnCaminoLocal(listaNueva) {
   const prev = new Map((pedidos || []).map((p) => [Number(p.id), p]));
-  const idsSesion = idsNotificadosEnCaminoSesion();
   return (listaNueva || []).map((p) => {
     const loc = prev.get(Number(p.id));
-    const marcadoSesion = idsSesion.has(Number(p.id));
-    if (!(loc && loc.notificadoEnCamino) && !marcadoSesion) return p;
-    return {
-      ...p,
-      notificadoEnCamino: true,
-      telefonosNotificadosEnCamino:
-        Array.isArray(p.telefonosNotificadosEnCamino) && p.telefonosNotificadosEnCamino.length
-          ? p.telefonosNotificadosEnCamino
-          : (loc && loc.telefonosNotificadosEnCamino) || [],
-    };
+    const esperaEnrutar = pedidoEsperaEnrutarTrasNotificar(p && p.id);
+    if (p && p.enCurso && !p.entregado && !p.cancelado) {
+      if ((loc && loc.notificadoEnCamino) || esperaEnrutar) {
+        return {
+          ...p,
+          notificadoEnCamino: true,
+          telefonosNotificadosEnCamino:
+            Array.isArray(p.telefonosNotificadosEnCamino) && p.telefonosNotificadosEnCamino.length
+              ? p.telefonosNotificadosEnCamino
+              : (loc && loc.telefonosNotificadosEnCamino) || [],
+        };
+      }
+      return p;
+    }
+    const base = loc ? { ...p, telefonosNotificadosEnCamino: loc.telefonosNotificadosEnCamino } : p;
+    return alinearNotificacionSiSiguePendiente(base);
   });
 }
 
@@ -715,7 +721,7 @@ function fusionarPedidosMensajeroConservandoOrden(delServidor, conservarObjetosL
     vistos.add(id);
     out.push(p);
   }
-  return out;
+  return out.map(alinearNotificacionSiSiguePendiente);
 }
 
 function routeNoticeEsNuevo(data) {
@@ -3472,7 +3478,7 @@ function crearTarjetaPedido(pedido, index) {
       : '';
   const btnNotificarHtml =
     etapaActual === 'notificar'
-      ? `<button class="btn-notify" onclick="notificarEnCamino(${index}, ${pedido.id}, { abrirEnrutarDespues: true, directoWhatsApp: true })"><i class="fa-solid fa-bullhorn"></i> Notificar</button>`
+      ? `<button class="btn-notify" onclick="notificarEnCamino(${index}, ${pedido.id}, { abrirEnrutarDespues: true, directoWhatsApp: true, forzarReenvio: true })"><i class="fa-solid fa-bullhorn"></i> Notificar</button>`
       : '';
   const btnNotificarNuevamenteHtml = '';
   const btnEnrutarHtml = etapaActual === 'enrutar'
@@ -6126,13 +6132,49 @@ function obtenerPedidoPorId(pedidoId) {
   return { pedido: null, indexActual: -1 };
 }
 
+const ENRUTAR_TRAS_NOTIF_MAX_MS = 12 * 60 * 1000;
+
+function leerPendienteEnrutarTrasNotif() {
+  let pend = enrutarTrasNotificacionPendiente;
+  if (!pend) {
+    try {
+      const raw = sessionStorage.getItem('deliveryEnrutarTrasNotif_v1');
+      if (raw) pend = JSON.parse(raw);
+    } catch (_e) {
+      pend = null;
+    }
+  }
+  if (!pend || pend.pedidoId == null) return null;
+  const at = Number(pend.at) || 0;
+  if (!at || Date.now() - at > ENRUTAR_TRAS_NOTIF_MAX_MS) return null;
+  return pend;
+}
+
+function pedidoEsperaEnrutarTrasNotificar(pedidoId) {
+  const pend = leerPendienteEnrutarTrasNotif();
+  return !!(pend && Number(pend.pedidoId) === Number(pedidoId));
+}
+
+function alinearNotificacionSiSiguePendiente(pedido) {
+  if (!pedido || pedido.cancelado || pedido.entregado) return pedido;
+  if (pedido.enCurso) return pedido;
+  if (pedidoEsperaEnrutarTrasNotificar(pedido.id)) {
+    pedido.notificadoEnCamino = true;
+    return pedido;
+  }
+  pedido.notificadoEnCamino = false;
+  pedido.telefonosNotificadosEnCamino = [];
+  return pedido;
+}
+
 function obtenerEtapaPedidoUI(pedido) {
   if (pedido.cancelado) return 'cancelado';
   if (pedido.entregado) return 'finalizado';
-  if (!pedido.notificadoEnCamino) return 'notificar';
-  if (!pedido.enCurso) return 'enrutar';
-  if (!pedido.llegoDestino) return 'enRuta';
-  return 'enDestino';
+  if (pedido.enCurso) {
+    if (!pedido.llegoDestino) return 'enRuta';
+    return 'enDestino';
+  }
+  return 'notificar';
 }
 
 function abrirNavegacionConSelector(index, pedidoId) {
@@ -6229,11 +6271,12 @@ function manejarNavegacionConNotificacion(index, pedidoId, tipoNavegacion) {
   const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   if (!pedido) return;
-  if (!pedido.notificadoEnCamino) {
-    mostrarAvisoEnApp(
-      'Todos los pedidos deben empezar por Notificar. Después de avisar al cliente aparecerá la opción para enrutar.',
-      'Notificar primero'
-    );
+  if (!pedido.notificadoEnCamino && !pedidoEsperaEnrutarTrasNotificar(pedidoId)) {
+    void notificarEnCamino(indexFinal, pedidoId, {
+      abrirEnrutarDespues: true,
+      directoWhatsApp: true,
+      forzarReenvio: true
+    });
     return;
   }
   abrirNavegacion(tipoNavegacion, indexFinal, pedidoId);
@@ -6452,6 +6495,8 @@ function notificarSiguientePedido(excluirPedidoId) {
     textoCancelar: 'Cerrar',
     onConfirmar: () => notificarEnCamino(indexSiguiente, siguiente.id, {
       abrirEnrutarDespues: true,
+      directoWhatsApp: true,
+      forzarReenvio: true
     }),
     onCancelar: () => {}
   });
@@ -6502,7 +6547,6 @@ function abrirWhatsAppNotificarEnCamino(tel, mensaje) {
   abrirWhatsAppConTexto(wa, mensaje);
 }
 
-let enrutarTrasNotificacionPendiente = null;
 const ENRUTAR_TRAS_NOTIF_SS_KEY = 'deliveryEnrutarTrasNotif_v1';
 const NOTIF_CAMINO_IDS_SS_KEY = 'deliveryNotifEnCaminoIds_v1';
 
@@ -6539,13 +6583,16 @@ function hayModalDecisionVisible() {
   return !!(el && el.style && el.style.display === 'flex');
 }
 
-function mostrarModalEnrutarTrasNotificacion(indexFinal, pedidoId, opciones) {
-  if (opciones && opciones.abrirEnrutarDespues === false) return;
-  if (!opciones || !opciones.abrirEnrutarDespues) return;
+function limpiarEsperaEnrutarTrasNotificacion() {
   enrutarTrasNotificacionPendiente = null;
   try {
     sessionStorage.removeItem(ENRUTAR_TRAS_NOTIF_SS_KEY);
   } catch (_e) {}
+}
+
+function mostrarModalEnrutarTrasNotificacion(indexFinal, pedidoId, opciones) {
+  if (opciones && opciones.abrirEnrutarDespues === false) return;
+  if (!opciones || !opciones.abrirEnrutarDespues) return;
   mostrarModalDecision({
     titulo: 'Enrutar ahora',
     texto: `Pedido #${pedidoId} notificado.\n¿Quieres enrutar ahora?`,
@@ -6553,8 +6600,19 @@ function mostrarModalEnrutarTrasNotificacion(indexFinal, pedidoId, opciones) {
     claseConfirmar: 'btn-route',
     mostrarSecundario: false,
     textoCancelar: 'Cerrar',
-    onConfirmar: () => enrutarConApps(indexFinal, pedidoId),
-    onCancelar: () => {}
+    onConfirmar: () => {
+      limpiarEsperaEnrutarTrasNotificacion();
+      enrutarConApps(indexFinal, pedidoId);
+    },
+    onCancelar: () => {
+      const { pedido } = obtenerPedidoPorId(pedidoId);
+      limpiarEsperaEnrutarTrasNotificacion();
+      if (pedido && !pedido.enCurso && !pedido.entregado && !pedido.cancelado) {
+        limpiarNotificacionEnCaminoPedido(pedido);
+        guardarPedidos();
+        renderPedidos();
+      }
+    }
   });
 }
 
@@ -6581,38 +6639,21 @@ function ofrecerEnrutarTrasNotificacionSiPendiente() {
   if (flujoPostCierrePedido) return false;
   if (hayModalDecisionVisible()) return false;
 
-  if (!enrutarTrasNotificacionPendiente) {
-    try {
-      const raw = sessionStorage.getItem(ENRUTAR_TRAS_NOTIF_SS_KEY);
-      if (raw) enrutarTrasNotificacionPendiente = JSON.parse(raw);
-    } catch (_e) {
-      enrutarTrasNotificacionPendiente = null;
-    }
-  }
-
-  let objetivo = null;
-  if (enrutarTrasNotificacionPendiente) {
-    const { pedido } = obtenerPedidoPorId(enrutarTrasNotificacionPendiente.pedidoId);
-    if (pedido) objetivo = pedido;
-  }
-  if (!objetivo) {
-    objetivo =
-      pedidos.find(
-        (p) =>
-          p &&
-          !p.entregado &&
-          !p.cancelado &&
-          !p.enCurso &&
-          !p.notificadoEnCamino &&
-          obtenerTelefonosNotificadosEnCamino(p).length > 0
-      ) || null;
-  }
-  if (!objetivo) return false;
-  if (objetivo.enCurso || objetivo.entregado || objetivo.cancelado) {
-    enrutarTrasNotificacionPendiente = null;
+  const pend = leerPendienteEnrutarTrasNotif();
+  if (!pend) {
+    if (enrutarTrasNotificacionPendiente) limpiarEsperaEnrutarTrasNotificacion();
     return false;
   }
-  if (!objetivo.notificadoEnCamino && obtenerTelefonosNotificadosEnCamino(objetivo).length > 0) {
+  enrutarTrasNotificacionPendiente = pend;
+
+  const { pedido } = obtenerPedidoPorId(pend.pedidoId);
+  const objetivo = pedido;
+  if (!objetivo) return false;
+  if (objetivo.enCurso || objetivo.entregado || objetivo.cancelado) {
+    limpiarEsperaEnrutarTrasNotificacion();
+    return false;
+  }
+  if (!objetivo.notificadoEnCamino) {
     completarNotificacionEnCaminoPedido(objetivo);
     guardarPedidos();
     renderPedidos();
@@ -6792,23 +6833,9 @@ async function notificarEnCamino(index, pedidoId, opciones = {}) {
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal) return;
 
-  const directo = !!opciones.directoWhatsApp;
-  if (opciones.forzarReenvio && !directo) {
+  const directo = opciones.directoWhatsApp !== false;
+  if (opciones.forzarReenvio) {
     limpiarNotificacionEnCaminoPedido(pedidoFinal);
-  }
-
-  if (pedidoFinal.notificadoEnCamino && !opciones.forzarReenvio && !directo) {
-    mostrarModalDecision({
-      titulo: 'Pedido ya notificado',
-      texto: `El pedido #${pedidoId} ya fue notificado.\n¿Volver a notificar?`,
-      textoConfirmar: 'Volver a notificar',
-      claseConfirmar: 'btn-notify',
-      mostrarSecundario: false,
-      textoCancelar: 'Cerrar',
-      onConfirmar: () => notificarEnCamino(indexFinal, pedidoId, { ...opciones, forzarReenvio: true }),
-      onSecundario: () => {}
-    });
-    return;
   }
 
   const tels = obtenerTelefonosPedido(pedidoFinal);
@@ -8041,11 +8068,9 @@ function cargarPedidosDesdeLocalStorage() {
   cargarPedidosLocalRev();
   cargarRutaLocalRev();
   const raw = cargarCachePedidos();
-  pedidos = deduplicarPedidosPorId((raw || []).map(normalizarPedidoEnMemoria));
-  const idsSesion = idsNotificadosEnCaminoSesion();
-  for (const p of pedidos) {
-    if (idsSesion.has(Number(p.id))) p.notificadoEnCamino = true;
-  }
+  pedidos = deduplicarPedidosPorId((raw || []).map(normalizarPedidoEnMemoria)).map(
+    alinearNotificacionSiSiguePendiente
+  );
   if (pedidos.length > 0) {
     nextPedidoId = Math.max(...pedidos.map((p) => p.id), 0) + 1;
   } else {
