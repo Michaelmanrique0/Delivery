@@ -6477,13 +6477,19 @@ function cerrarModalFinalizacionEntrega() {
 }
 
 function obtenerSiguientePedidoActivo(excluirPedidoId) {
-  return pedidos.find(p => !p.cancelado && !p.entregado && p.id !== excluirPedidoId) || null;
+  return pedidos.find((p) =>
+    p &&
+    !p.cancelado &&
+    !p.entregado &&
+    !p.enCurso &&
+    Number(p.id) !== Number(excluirPedidoId)
+  ) || null;
 }
 
 function notificarSiguientePedido(excluirPedidoId) {
   const siguiente = obtenerSiguientePedidoActivo(excluirPedidoId);
   if (!siguiente) return;
-  const indexSiguiente = pedidos.findIndex(p => p.id === siguiente.id);
+  const indexSiguiente = pedidos.findIndex((p) => Number(p.id) === Number(siguiente.id));
   if (indexSiguiente < 0) return;
 
   mostrarModalDecision({
@@ -6493,11 +6499,14 @@ function notificarSiguientePedido(excluirPedidoId) {
     claseConfirmar: 'btn-notify',
     mostrarSecundario: false,
     textoCancelar: 'Cerrar',
-    onConfirmar: () => notificarEnCamino(indexSiguiente, siguiente.id, {
-      abrirEnrutarDespues: true,
-      directoWhatsApp: true,
-      forzarReenvio: true
-    }),
+    onConfirmar: () => {
+      void notificarEnCamino(indexSiguiente, siguiente.id, {
+        abrirEnrutarDespues: true,
+        directoWhatsApp: true,
+        forzarReenvio: true,
+        omitirAvisoYaNotificado: true
+      });
+    },
     onCancelar: () => {}
   });
 }
@@ -6833,10 +6842,11 @@ async function notificarEnCamino(index, pedidoId, opciones = {}) {
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal) return;
 
-  const directo = opciones.directoWhatsApp !== false;
-  if (opciones.forzarReenvio) {
-    limpiarNotificacionEnCaminoPedido(pedidoFinal);
-  }
+  const desdeSiguiente = !!opciones.omitirAvisoYaNotificado;
+  const directo = opciones.directoWhatsApp !== false || desdeSiguiente;
+  // Primera notificación de este aviso (o botón Notificar): ir a WhatsApp,
+  // nunca preguntar si ya se notificó y se quiere volver a enviar.
+  limpiarNotificacionEnCaminoPedido(pedidoFinal);
 
   const tels = obtenerTelefonosPedido(pedidoFinal);
   if (!tels.length) { mostrarAvisoEnApp('No hay número de teléfono del cliente disponible', 'Notificación'); return; }
