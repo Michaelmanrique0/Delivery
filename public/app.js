@@ -2835,7 +2835,8 @@ function uidPedidoAsignado(p) {
 
 function obtenerValorAReclamarPedido(pedido) {
   const metodo = pedido && pedido.metodoPagoEntrega ? String(pedido.metodoPagoEntrega) : '';
-  if (metodo === 'pagado_tienda' || metodo === 'es_cambio') return 0;
+  if (metodo === 'pagado_tienda' || metodo === 'es_cambio' || metodo === 'devolucion') return 0;
+  if (pedido && pedido.esDevolucionCliente) return 0;
   const n = parseInt((pedido && pedido.valor) || 0, 10);
   return Number.isFinite(n) ? n : 0;
 }
@@ -4233,6 +4234,9 @@ function marcarRegresarAEnRuta(index) {
     pedido.cambioMetodo = '';
     pedido.montoCambio = 0;
     pedido.ajusteVueltasDigitales = false;
+    pedido.esDevolucionCliente = false;
+    pedido.montoDevolucion = 0;
+    pedido.metodoDevolucion = '';
     const fechaPrev = pedido.fechaOperacion;
     pedido.fechaOperacion = null;
     limpiarEntregaPorteriaEnPedido(pedido);
@@ -5236,6 +5240,11 @@ function textoMetodoPagoEntregaPedido(pedido) {
   }
   if (metodo === 'pagado_tienda') return 'Ya se pagó a la tienda';
   if (metodo === 'es_cambio') return 'Es un cambio';
+  if (metodo === 'devolucion' || pedido?.esDevolucionCliente) {
+    const medio = textoMedioDevolucionCliente(pedido.metodoDevolucion);
+    const monto = Number(pedido.montoDevolucion || 0);
+    return `Devolución al cliente (${medio}: $${monto.toLocaleString('es-CO')})`;
+  }
   return 'No especificado';
 }
 
@@ -5255,6 +5264,8 @@ function construirMensajeEntregaRegistrada(pedido) {
       ? 'No aplica (ya se pagó a la tienda)'
       : metodo === 'es_cambio'
         ? 'No aplica (es un cambio)'
+        : metodo === 'devolucion' || pedido.esDevolucionCliente
+          ? `Devolución $${Number(pedido.montoDevolucion || 0).toLocaleString('es-CO')}`
         : `$${montoRecibido.toLocaleString('es-CO')}`;
   const recibidoPor = String(pedido.porteriaRecibidoPor || '').trim();
   const detalleEntrega =
@@ -5271,7 +5282,7 @@ function construirMensajeEntregaRegistrada(pedido) {
       : 'Valor modificado: no';
   const lineaCambio = textoLineaCambioEntregaPedido(pedido);
   let lineasDesglose = '';
-  if (metodo !== 'pagado_tienda' && metodo !== 'es_cambio') {
+  if (metodo !== 'pagado_tienda' && metodo !== 'es_cambio' && metodo !== 'devolucion' && !pedido.esDevolucionCliente) {
     const partes = [];
     if (montoEfectivo) partes.push(`Efectivo ${formatearMontoConSigno(montoEfectivo)}`);
     if (montoNequi) partes.push(`Nequi ${formatearMontoConSigno(montoNequi)}`);
@@ -5294,10 +5305,14 @@ function textoMedioCambioEntrega(medio) {
   return 'No especificado';
 }
 
+function textoMedioDevolucionCliente(medio) {
+  return textoMedioCambioEntrega(medio);
+}
+
 function textoLineaCambioEntregaPedido(pedido) {
   if (!pedido) return 'Cambio entregado: no';
   const metodo = String(pedido.metodoPagoEntrega || '');
-  if (metodo === 'pagado_tienda' || metodo === 'es_cambio') {
+  if (metodo === 'pagado_tienda' || metodo === 'es_cambio' || metodo === 'devolucion' || pedido.esDevolucionCliente) {
     return 'Cambio entregado: no aplica';
   }
   if (!pedido.dioCambio) return 'Cambio entregado: no';
@@ -5587,7 +5602,7 @@ function limpiarNotificacionNoEntregadoEnPedido(pedido) {
 }
 
 function hayModalBloqueandoNotificacionCliente() {
-  const ids = ['modalDecision', 'modalPagoEntregado', 'modalNoEntregado'];
+  const ids = ['modalDecision', 'modalPagoEntregado', 'modalNoEntregado', 'modalDevolucionCliente'];
   return ids.some((id) => {
     const el = document.getElementById(id);
     return el && el.style.display === 'flex';
@@ -5722,6 +5737,127 @@ function fotoEntregado(index, pedidoId) {
   const modal = asegurarModalPagoEntregado();
   mostrarPasoModalPagoEntregado('lugar');
   modal.style.display = 'flex';
+}
+
+let devolucionPendiente = { index: null, pedidoId: null };
+
+function asegurarModalDevolucionCliente() {
+  let modal = document.getElementById('modalDevolucionCliente');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'modalDevolucionCliente';
+  modal.className = 'modal-no-entregado-backdrop';
+  modal.innerHTML = `
+    <div class="modal-no-entregado-card modal-no-entregado-card--con-cerrar-x">
+      <button type="button" class="modal-no-entregado-close-x" onclick="cerrarModalDevolucionCliente()" aria-label="Cerrar">
+        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+      </button>
+      <h3>Foto devolución</h3>
+      <p>Indica el monto a regresarle al cliente y el método de devolución.</p>
+      <label class="modal-editar-pedido-label" for="montoDevolucionCliente">Monto a regresar</label>
+      <input id="montoDevolucionCliente" type="text" inputmode="numeric" placeholder="Ej: 20.000" style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:8px; margin-bottom:12px;">
+      <p>Método de devolución</p>
+      <div class="modal-no-entregado-actions">
+        <button type="button" class="btn-info" onclick="confirmarDevolucionCliente('efectivo')">Efectivo</button>
+        <button type="button" class="btn-success" onclick="confirmarDevolucionCliente('nequi')">Nequi</button>
+        <button type="button" class="btn-route" onclick="confirmarDevolucionCliente('daviplata')">Daviplata</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  vincularFormateoMilesInput(document.getElementById('montoDevolucionCliente'));
+  return modal;
+}
+
+function mostrarModalDevolucionCliente(index, pedidoId) {
+  devolucionPendiente = { index, pedidoId };
+  const modal = asegurarModalDevolucionCliente();
+  const input = document.getElementById('montoDevolucionCliente');
+  if (input) {
+    input.value = '';
+    setTimeout(() => input.focus(), 50);
+  }
+  modal.style.display = 'flex';
+}
+
+function cerrarModalDevolucionCliente() {
+  const modal = document.getElementById('modalDevolucionCliente');
+  if (modal) modal.style.display = 'none';
+  devolucionPendiente = { index: null, pedidoId: null };
+}
+
+function confirmarDevolucionCliente(metodo) {
+  const { index, pedidoId } = devolucionPendiente;
+  if (!['efectivo', 'nequi', 'daviplata'].includes(String(metodo || ''))) return;
+  const input = document.getElementById('montoDevolucionCliente');
+  const monto = parseMontoEntero(input && input.value);
+  if (!monto || monto < 1) {
+    mostrarToast('Indica el monto a regresarle al cliente.', 'warning');
+    if (input) input.focus();
+    return;
+  }
+  const indexGuardado = index;
+  const idGuardado = pedidoId;
+  cerrarModalDevolucionCliente();
+  registrarDevolucionCliente(indexGuardado, idGuardado, monto, metodo);
+}
+
+function construirMensajeDevolucionTienda(pedido) {
+  const pedidoId = pedido && pedido.id != null ? pedido.id : 'N/A';
+  const monto = Number(pedido.montoDevolucion || 0);
+  const medio = textoMedioDevolucionCliente(pedido.metodoDevolucion);
+  const productos = textoProductosEntregaParaSoporte(pedido);
+  return `Pedido #${pedidoId} — devolución al cliente
+Monto a regresar: $${monto.toLocaleString('es-CO')}
+Método de devolución: ${medio}
+Producto(s):
+${productos}`;
+}
+
+async function registrarDevolucionCliente(index, pedidoId, monto, metodo) {
+  const indexActual = pedidos.findIndex((p) => Number(p.id) === Number(pedidoId));
+  const indexFinal = indexActual >= 0 ? indexActual : index;
+  const pedido = pedidos[indexFinal];
+  if (!pedido) return;
+
+  const montoNum = Number(monto || 0);
+  pedido.noEntregado = false;
+  pedido.envioRecogido = false;
+  pedido.esDevolucionCliente = true;
+  pedido.montoDevolucion = montoNum;
+  pedido.metodoDevolucion = metodo;
+  pedido.metodoPagoEntrega = 'devolucion';
+  pedido.montoNequi = metodo === 'nequi' ? -montoNum : 0;
+  pedido.montoDaviplata = metodo === 'daviplata' ? -montoNum : 0;
+  pedido.montoEfectivo = metodo === 'efectivo' ? -montoNum : 0;
+  pedido.dioCambio = false;
+  pedido.cambioMetodo = '';
+  pedido.montoCambio = 0;
+  pedido.ajusteVueltasDigitales = false;
+  limpiarEntregaPorteriaEnPedido(pedido);
+
+  pedido.entregado = true;
+  pedido.enCurso = false;
+  pedido.llegoDestino = false;
+  pedido.posicionPendiente = null;
+  sellarFechaOperacionPedido(pedido);
+
+  const mensaje = construirMensajeDevolucionTienda(pedido);
+  guardarPedidos();
+  renderPedidos();
+  actualizarMarcadores();
+
+  const numeroAdmin = obtenerSoporteWhatsApp();
+  void copiarTextoAlPortapapeles(
+    mensaje,
+    'Mensaje copiado. Pégalo en el chat y adjunta la foto de la devolución.'
+  );
+  abrirWhatsAppChat(numeroAdmin);
+
+  void persistirHistorialTrasCierrePedido(pedido);
+  window.setTimeout(() => {
+    notificarSiguientePedido(pedidoId);
+  }, 700);
 }
 
 async function registrarEntregaConPago(index, pedidoId, datosPago) {
@@ -6319,7 +6455,8 @@ let finalizacionPendiente = { index: null, pedidoId: null };
 
 function asegurarModalFinalizacionEntrega() {
   let modal = document.getElementById('modalFinalizacionEntrega');
-  if (modal) return modal;
+  if (modal && document.getElementById('btnFotoDevolucion')) return modal;
+  if (modal) modal.remove();
 
   modal = document.createElement('div');
   modal.id = 'modalFinalizacionEntrega';
@@ -6330,6 +6467,7 @@ function asegurarModalFinalizacionEntrega() {
       <p>Selecciona cómo quieres finalizar este pedido:</p>
       <div class="modal-no-entregado-actions">
         <button class="btn-camera" onclick="finalizarEntregaConResultado('foto_entrega')">Foto de entrega</button>
+        <button id="btnFotoDevolucion" class="btn-camera" onclick="finalizarEntregaConResultado('foto_devolucion')">Foto devolución</button>
         <button class="btn-warning" onclick="finalizarEntregaConResultado('foto_no_entregado')">Foto no entregado</button>
         <button class="btn-info" onclick="finalizarEntregaConResultado('sin_foto')">Sin foto</button>
       </div>
@@ -6559,6 +6697,10 @@ function finalizarEntregaConResultado(tipoFinalizacion) {
     noEntregadoPendiente = { index: indexFinal, pedidoId };
     mostrarOpcionesNoEntregado(indexFinal, pedidoId);
     return;
+  }
+
+  if (tipoFinalizacion === 'foto_devolucion') {
+    mostrarModalDevolucionCliente(indexFinal, pedidoId);
   }
 }
 
@@ -7415,6 +7557,9 @@ function normalizarPedidoEnMemoria(p) {
   if (!p.hasOwnProperty('cambioMetodo')) p.cambioMetodo = '';
   if (!p.hasOwnProperty('montoCambio')) p.montoCambio = 0;
   if (!p.hasOwnProperty('ajusteVueltasDigitales')) p.ajusteVueltasDigitales = false;
+  if (!p.hasOwnProperty('esDevolucionCliente')) p.esDevolucionCliente = false;
+  if (!p.hasOwnProperty('montoDevolucion')) p.montoDevolucion = 0;
+  if (!p.hasOwnProperty('metodoDevolucion')) p.metodoDevolucion = '';
   if (!p.hasOwnProperty('fechaOperacion')) p.fechaOperacion = null;
   if (!p.hasOwnProperty('telefonos')) p.telefonos = [];
   p.nombre = limpiarNombreExtraidoPedido(p.nombre);
@@ -7628,6 +7773,9 @@ function pedidoAObjetoCompacto(p) {
   if (Number(p.montoNequi)) o.mn = Number(p.montoNequi);
   if (Number(p.montoDaviplata)) o.md = Number(p.montoDaviplata);
   if (Number(p.montoEfectivo)) o.me = Number(p.montoEfectivo);
+  if (p.esDevolucionCliente) o.dv = 1;
+  if (Number(p.montoDevolucion)) o.mdv = Number(p.montoDevolucion);
+  if (p.metodoDevolucion) o.mtv = p.metodoDevolucion;
   return o;
 }
 
@@ -7659,6 +7807,9 @@ function pedidoDesdeObjetoCompacto(c) {
     montoNequi: Number(c.mn ?? 0),
     montoDaviplata: Number(c.md ?? 0),
     montoEfectivo: Number(c.me ?? 0),
+    esDevolucionCliente: !!c.dv,
+    montoDevolucion: Number(c.mdv ?? 0),
+    metodoDevolucion: c.mtv || '',
   };
   if (Array.isArray(c.c) && c.c.length >= 2) {
     plain.coords = { lat: Number(c.c[0]), lng: Number(c.c[1]) };
@@ -7855,6 +8006,9 @@ function pedidoDesdeObjetoImport(o) {
     montoNequi: Number(o.montoNequi ?? o.monto_nequi ?? 0),
     montoDaviplata: Number(o.montoDaviplata ?? o.monto_daviplata ?? 0),
     montoEfectivo: Number(o.montoEfectivo ?? o.monto_efectivo ?? 0),
+    esDevolucionCliente: !!(o.esDevolucionCliente ?? o.es_devolucion_cliente),
+    montoDevolucion: Number(o.montoDevolucion ?? o.monto_devolucion ?? 0),
+    metodoDevolucion: o.metodoDevolucion || o.metodo_devolucion || '',
   };
   return normalizarPedidoEnMemoria(merged);
 }
@@ -9058,7 +9212,7 @@ function formatearFechaHistorialEs(fechaIso) {
 
 function estadoPedidoParaHistorial(p) {
   if (!p) return 'entregado';
-  if (p.cancelado || (p.noEntregado && p.envioRecogido)) return 'devuelto';
+  if (p.esDevolucionCliente || p.cancelado || (p.noEntregado && p.envioRecogido)) return 'devuelto';
   if (p.noEntregado) return 'sin_entregar';
   return 'entregado';
 }
@@ -9071,18 +9225,24 @@ function etiquetaEstadoHistorial(estado) {
 
 function resumenHistorialDesdePedidosPorFecha(fecha) {
   const delDia = pedidos.filter((p) => p && String(p.fechaOperacion || '') === String(fecha));
-  const entregadosLista = delDia.filter((p) => p.entregado && !p.noEntregado && !p.cancelado);
+  const entregadosLista = delDia.filter(
+    (p) => p.entregado && !p.noEntregado && !p.cancelado && !p.esDevolucionCliente
+  );
   const sinEntregarLista = delDia.filter((p) => p.noEntregado && !p.envioRecogido);
+  const devolucionesLista = delDia.filter((p) => p.esDevolucionCliente);
   const devueltosLista = delDia.filter(
-    (p) => p.cancelado || (p.noEntregado && p.envioRecogido)
+    (p) => p.cancelado || (p.noEntregado && p.envioRecogido) || p.esDevolucionCliente
   );
   const pagadosNequi = entregadosLista.filter((p) => Number(p.montoNequi || 0) > 0).length;
   const recogidoTotal = entregadosLista.reduce((s, p) => s + obtenerValorAReclamarPedido(p), 0);
-  const recogidoEfectivo = entregadosLista.reduce((s, p) => s + Number(p.montoEfectivo || 0), 0);
-  const recogidoNequi = entregadosLista.reduce((s, p) => s + Number(p.montoNequi || 0), 0);
-  const recogidoDaviplata = entregadosLista.reduce((s, p) => s + Number(p.montoDaviplata || 0), 0);
+  const conMontos = [...entregadosLista, ...devolucionesLista];
+  const recogidoEfectivo = conMontos.reduce((s, p) => s + Number(p.montoEfectivo || 0), 0);
+  const recogidoNequi = conMontos.reduce((s, p) => s + Number(p.montoNequi || 0), 0);
+  const recogidoDaviplata = conMontos.reduce((s, p) => s + Number(p.montoDaviplata || 0), 0);
   const enviosPagoMensajero =
-    entregadosLista.length + delDia.filter((p) => p.noEntregado && p.envioRecogido).length;
+    entregadosLista.length +
+    devolucionesLista.length +
+    delDia.filter((p) => p.noEntregado && p.envioRecogido).length;
   const pagadoMensajero = enviosPagoMensajero * TARIFA_PAGO_MENSAJERO;
   const aEntregarTienda = Math.max(recogidoTotal - pagadoMensajero, 0);
 
