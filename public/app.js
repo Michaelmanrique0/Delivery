@@ -1113,10 +1113,11 @@ function mediosPagoVacio() {
 
 function boolConfigNotificacion(valor, predeterminado) {
   if (typeof valor === 'boolean') return valor;
+  if (typeof valor === 'number') return valor !== 0;
   if (typeof valor === 'string') {
     const normalizado = valor.trim().toLowerCase();
-    if (normalizado === 'false') return false;
-    if (normalizado === 'true') return true;
+    if (normalizado === 'false' || normalizado === '0') return false;
+    if (normalizado === 'true' || normalizado === '1') return true;
   }
   return predeterminado;
 }
@@ -1128,14 +1129,15 @@ function parsearMediosPagoCliente(cfg) {
   let numeroDaviplata = String(g.numeroDaviplata || '').replace(/\D/g, '');
   if (!numeroNequi && legacyNum) numeroNequi = legacyNum;
   if (!numeroDaviplata && legacyNum) numeroDaviplata = legacyNum;
+  const llavePago = String(g.llavePago || '').trim();
   return {
-    tieneNequi: boolConfigNotificacion(g.tieneNequi, false),
-    tieneDaviplata: boolConfigNotificacion(g.tieneDaviplata, false),
+    tieneNequi: boolConfigNotificacion(g.tieneNequi, false) || !!numeroNequi,
+    tieneDaviplata: boolConfigNotificacion(g.tieneDaviplata, false) || !!numeroDaviplata,
     numeroNequi,
     numeroDaviplata,
     nombreTitular: String(g.nombreTitular || '').trim(),
-    tieneLlave: boolConfigNotificacion(g.tieneLlave, false),
-    llavePago: String(g.llavePago || '').trim(),
+    tieneLlave: boolConfigNotificacion(g.tieneLlave, false) || !!llavePago,
+    llavePago,
   };
 }
 
@@ -1145,6 +1147,19 @@ function mediosPagoNotificacionListos(cfg) {
   if (c.tieneDaviplata && c.numeroDaviplata) return true;
   if (c.tieneLlave && c.llavePago) return true;
   return false;
+}
+
+function obtenerMediosPagoListosParaNotificar() {
+  const candidatos = [
+    paymentConfigEstado.effective,
+    paymentConfigEstado.personal,
+    paymentConfigEstado.tienda,
+  ];
+  for (const cfg of candidatos) {
+    const parsed = parsearMediosPagoCliente(cfg);
+    if (mediosPagoNotificacionListos(parsed)) return parsed;
+  }
+  return parsearMediosPagoCliente(paymentConfigEstado.effective);
 }
 
 function mensajeErrorMediosPago(cfg) {
@@ -1561,7 +1576,7 @@ async function guardarMediosPagoTiendaDesdeUI() {
 }
 
 function construirBloquePagoNotificacion() {
-  const cfg = parsearMediosPagoCliente(paymentConfigEstado.effective);
+  const cfg = obtenerMediosPagoListosParaNotificar();
   const lineas = [];
   const nom = cfg.nombreTitular ? ` (${cfg.nombreTitular})` : '';
   if (cfg.tieneNequi && cfg.numeroNequi) {
@@ -6853,7 +6868,8 @@ async function notificarEnCamino(index, pedidoId, opciones = {}) {
 
   await refrescarPaymentConfigDesdeServidor();
   const requiereMediosPago = montoACobrarParaNotificacionEnCamino(pedidoFinal) > 0;
-  if (requiereMediosPago && !mediosPagoNotificacionListos(paymentConfigEstado.effective)) {
+  const mediosListos = mediosPagoNotificacionListos(obtenerMediosPagoListosParaNotificar());
+  if (requiereMediosPago && !mediosListos) {
     abrirConfigNotificacionParaNotificar(indexFinal, pedidoId, opciones);
     return;
   }

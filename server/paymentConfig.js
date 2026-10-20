@@ -8,10 +8,11 @@ function metaUserKey(userId) {
 
 function boolVal(valor, predeterminado) {
   if (typeof valor === 'boolean') return valor;
+  if (typeof valor === 'number') return valor !== 0;
   if (typeof valor === 'string') {
     const n = valor.trim().toLowerCase();
-    if (n === 'false') return false;
-    if (n === 'true') return true;
+    if (n === 'false' || n === '0') return false;
+    if (n === 'true' || n === '1') return true;
   }
   return predeterminado;
 }
@@ -35,14 +36,15 @@ function parsePaymentConfig(raw) {
   let numeroDaviplata = String(g.numeroDaviplata || '').replace(/\D/g, '');
   if (!numeroNequi && legacyNum) numeroNequi = legacyNum;
   if (!numeroDaviplata && legacyNum) numeroDaviplata = legacyNum;
+  const llavePago = String(g.llavePago || '').trim();
   return {
-    tieneNequi: boolVal(g.tieneNequi, false),
-    tieneDaviplata: boolVal(g.tieneDaviplata, false),
+    tieneNequi: boolVal(g.tieneNequi, false) || !!numeroNequi,
+    tieneDaviplata: boolVal(g.tieneDaviplata, false) || !!numeroDaviplata,
     numeroNequi,
     numeroDaviplata,
     nombreTitular: String(g.nombreTitular || '').trim(),
-    tieneLlave: boolVal(g.tieneLlave, false),
-    llavePago: String(g.llavePago || '').trim(),
+    tieneLlave: boolVal(g.tieneLlave, false) || !!llavePago,
+    llavePago,
   };
 }
 

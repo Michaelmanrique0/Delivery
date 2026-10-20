@@ -397,13 +397,13 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="app.js?v=20261020siguientenotif"></script>
+<script src="app.js?v=20261020medioslistos"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
     // Limpiar SW/caché viejos que dejaban el parser anterior (productos/valor incorrectos).
     var reiniciar = function () {
-      navigator.serviceWorker.register('./sw.js?v=20261020siguientenotif').catch(function (err) {
+      navigator.serviceWorker.register('./sw.js?v=20261020medioslistos').catch(function (err) {
         console.warn('[sw] No se pudo registrar:', err);
       });
     };
