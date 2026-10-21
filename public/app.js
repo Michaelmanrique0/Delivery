@@ -809,9 +809,23 @@ function escapeHtmlTexto(s) {
 
 function lineasProductosDesdeArray(arr) {
   if (!Array.isArray(arr) || arr.length === 0) return [];
-  return arr
-    .map((p) => String(p || '').trim())
-    .filter((p) => p.length > 0 && !/^cambio\.?$/i.test(p) && !esLineaPlantillaPedidoNoProducto(p));
+  const plano = [];
+  for (const item of arr) {
+    String(item || '')
+      .split(/\r?\n/)
+      .forEach((linea) => plano.push(linea));
+  }
+  const vistos = new Set();
+  const out = [];
+  for (const raw of plano) {
+    const p = String(raw || '').trim();
+    if (!p || /^cambio\.?$/i.test(p) || esLineaPlantillaPedidoNoProducto(p)) continue;
+    const clave = p.toLowerCase().replace(/\s+/g, ' ');
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    out.push(p);
+  }
+  return out;
 }
 
 /** Quita emojis/tonos de piel al inicio de línea (📍, 🙋🏻, etc.). */
@@ -838,11 +852,10 @@ function extraerProductosSoloDelBloque(bloque) {
   const text = String(bloque || '').replace(/\r\n/g, '\n');
   if (!text.trim()) return [];
 
-  // Busca el último bloque Producto … ¿Todo en orden?
-  const re = /(?:^|\n)[ \t]*Producto(?:s)?\b[^\n]*\n([\s\S]*?)(?=\n[ \t]*¿?\s*Todo\s+en\s+orden\b|$)/gi;
-  let m;
-  let chunk = '';
-  while ((m = re.exec(text))) chunk = m[1] || '';
+  // Primer bloque Producto … hasta “¿Todo en orden?”, el formulario de envío u horario.
+  const re = /(?:^|\n)[ \t]*Producto(?:s)?\b[^\n]*\n([\s\S]*?)(?=\n[ \t]*¿?\s*Todo\s+en\s+orden\b|\n[ \t]*Para\s+realizar\s+tu\s+env[ií]o\b|\n[ \t]*Para\s+agilizar\b|\n[ \t]*Horario\b|$)/i;
+  const m = text.match(re);
+  let chunk = m && m[1] ? m[1] : '';
   if (!chunk) {
     // Respaldo: encabezado y producto en la misma línea
     const m2 = text.match(/(?:^|\n)[ \t]*Producto(?:s)?\b[^\n]*:\s*([^\n]+)/i);
@@ -878,11 +891,15 @@ function esLineaResiduoGuiaNoProducto(linea) {
   if (/^https?:/i.test(L)) return true;
   if (/^¿?\s*Todo\s+en\s+orden\b/i.test(L)) return true;
   if (/^Para\s+agilizar\b/i.test(L)) return true;
+  if (/^Para\s+realizar\s+tu\s+env[ií]o\b/i.test(L)) return true;
+  if (/completes?\s+los\s+siguientes\s+datos/i.test(L)) return true;
   if (/^Env[ií]o\b/i.test(L)) return true;
   if (/^Horario\b/i.test(L)) return true;
+  if (/^Transcurso\s+del\s+d[ií]a\b/i.test(L)) return true;
+  if (/\bentre\s+\d{1,2}\s*:\s*\d{2}\s*(?:a\.?\s*m\.?|p\.?\s*m\.?)\s*y\s+\d{1,2}/i.test(L)) return true;
   if (/^\d+\s*:\s*$/.test(L)) return true;
   if (
-    /^(?:Direcci[oó]n|Ubicaci[oó]n|Nombre|Tel[ée]fono|Celular|WhatsApp|M[oó]vil|Valor|Total|A\s+recoger|Por\s+cobrar|Recaudo|Pago|N[uú]mero)\b/i.test(
+    /^(?:Direcci[oó]n|Ubicaci[oó]n|Nombre|Tel[ée]fono|Celular|WhatsApp|M[oó]vil|Valor|Total|A\s+recoger|Por\s+cobrar|Recaudo|Pago|N[uú]mero|Localidad|Barrio)\b/i.test(
       L
     )
   ) {
@@ -891,10 +908,15 @@ function esLineaResiduoGuiaNoProducto(linea) {
   if (/recibir[aá]\s+el\s+pedido/i.test(L)) return true;
   if (/^quien\s+recib/i.test(L)) return true;
   if (/barrio\s+y\s+localidad/i.test(L)) return true;
+  if (/\blocalidad\b/i.test(L) && L.length < 80) return true;
   if (/^[\d\s+().-]{7,}$/.test(L) && L.replace(/\D/g, '').length >= 7) return true;
   if (/^\$?\s*[\d.,]+\s*$/.test(L)) return true;
   if (/^(?:Producto|Productos)\b/i.test(L) && !/:\s*\S/.test(L)) return true;
-  if (/^(?:calle|carrera|cra\.?|cl\.?|kr\.?|av\.?|avenida|diagonal|transversal|tv\.?|conjunto)\b/i.test(L)) {
+  if (
+    /^(?:calle|carrera|cra\.?|cl\.?|kr\.?|av\.?|avenida|diagonal|dg\.?|diag\.?|transversal|tv\.?|conjunto|mz\.?|manzana|torre|apto\.?|apartamento|casa)\b/i.test(
+      L
+    )
+  ) {
     return true;
   }
   return false;
@@ -944,7 +966,27 @@ function extraerValorAPagarDesdeBloque(bloque) {
 const PARSER_PEDIDOS_BUILD = '20260825f';
 
 function lineasProductosPedidoNormalizadas(pedido) {
-  return lineasProductosDesdeArray(pedido && pedido.productos);
+  const lineas = lineasProductosDesdeArray(pedido && pedido.productos);
+  if (!pedido || lineas.length === 0) return lineas;
+  const nombre = String(pedido.nombre || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  const direccion = String(pedido.direccion || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  return lineas.filter((linea) => {
+    const clave = String(linea || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+    if (!clave) return false;
+    if (nombre && clave === nombre) return false;
+    if (direccion && clave === direccion) return false;
+    if (direccion && clave.length >= 12 && direccion.includes(clave)) return false;
+    return true;
+  });
 }
 
 /** Texto multilínea (p. ej. modal editar) → array `productos` del pedido. */
@@ -7527,6 +7569,7 @@ function normalizarPedidoEnMemoria(p) {
   }
   if (!p.hasOwnProperty('createdBy')) p.createdBy = null;
   if (!Array.isArray(p.productos)) p.productos = [];
+  p.productos = lineasProductosPedidoNormalizadas(p);
   if (!p.hasOwnProperty('mapUrl')) p.mapUrl = '';
   if (!p.hasOwnProperty('coords') || !p.coords) p.coords = null;
   if (!p.hasOwnProperty('enCurso')) p.enCurso = false;
