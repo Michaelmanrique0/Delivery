@@ -12,6 +12,7 @@ let nextPedidoId = 1;
 let vistaPedidosActual = 'pendientes';
 let vistaPedidosSeleccionadaManual = false;
 let enrutarTrasNotificacionPendiente = null;
+let segundoTelTrasNotificacionPendiente = null;
 const TELEFONO_SOPORTE = '3213153165';
 /** Pedidos en este dispositivo (sin login). */
 const CACHE_PEDIDOS_KEY = 'cachePedidos_v1';
@@ -2307,6 +2308,24 @@ function esValorNombrePedidoInvalido(raw) {
   return false;
 }
 
+function limpiarDireccionExtraidaPedido(raw) {
+  let d = String(raw || '').trim();
+  if (!d) return '';
+  d = d.replace(/\uFE0F/g, '');
+  d = d.replace(/^📍\s*/u, '');
+  d = d.replace(
+    /^Direcci[oó]n\s+completa\s*\(\s*con\s+barrio\s+y\s+localidad\s*\)\s*:?\s*/i,
+    ''
+  );
+  d = d.replace(/^Direcci[oó]n\s+completa\s*:?\s*/i, '');
+  d = d.replace(/^Direcci[oó]n\s*:?\s*/i, '');
+  d = d.replace(/^Ubicaci[oó]n\s*:?\s*/i, '');
+  d = d.replace(/^\(\s*con\s+barrio\s+y\s+localidad\s*\)\s*:?\s*/i, '');
+  d = d.replace(/\s+/g, ' ').trim();
+  if (/^direcci[oó]n\s+completa\b/i.test(d) && !/\d/.test(d) && d.length < 90) return '';
+  return d;
+}
+
 function limpiarNombreExtraidoPedido(raw) {
   const nombre = String(raw || '')
     .trim()
@@ -2341,7 +2360,7 @@ function extraerCamposPedido(bloque) {
   for (const re of dirPatrones) {
     const m = b.match(re);
     if (m && m[1]) {
-      direccion = m[1].trim().replace(/\n\s*/g, ' ').trim();
+      direccion = limpiarDireccionExtraidaPedido(m[1].trim().replace(/\n\s*/g, ' ').trim());
       if (direccion) break;
     }
   }
@@ -2376,7 +2395,7 @@ function extraerCamposPedido(bloque) {
     ),
     // Sin dos puntos: "📲 Número de celular\n3018284151"
     new RegExp(
-      `📲\\s*(?:N[uú]mero\\s+de\\s+celular|Celular|Tel[ée]fono|WhatsApp|M[oó]vil)?\\s*\\n+\\s*([\\d\\s+().-]{7,})`,
+      `📲\\s*(?:N[uú]mero\\s+de\\s+celular|Celular|Tel[ée]fono|WhatsApp|M[oó]vil)?\\s*\\n+\\s*([\\d\\s+().\\n-]{7,})`,
       'iu'
     ),
     new RegExp(
@@ -2389,10 +2408,9 @@ function extraerCamposPedido(bloque) {
   for (const re of telPatrones) {
     const m = b.match(re);
     if (m && m[1]) {
-      const telRaw = m[1].trim().split('\n')[0].trim();
-      telefonos = normalizarTelefonosDesdeTexto(telRaw);
+      telefonos = normalizarTelefonosDesdeTexto(m[1]);
       telefono = telefonos[0] || '';
-      if (telefono && telefono.length >= 7) break;
+      if (telefonos.length >= 1 && telefono.length >= 7) break;
       telefono = '';
       telefonos = [];
     }
@@ -5713,6 +5731,7 @@ function configurarRetornoNotificarClientePorteria() {
   const avanzarTrasRetornoReal = () => {
     if (hayModalBloqueandoNotificacionCliente()) return;
 
+    if (ofrecerSegundoTelefonoTrasNotificacionSiPendiente()) return;
     if (ofrecerEnrutarTrasNotificacionSiPendiente()) return;
 
     const flujo = flujoPostCierrePedido;
@@ -6351,7 +6370,7 @@ function pedidoEsperaEnrutarTrasNotificar(pedidoId) {
 function alinearNotificacionSiSiguePendiente(pedido) {
   if (!pedido || pedido.cancelado || pedido.entregado) return pedido;
   if (pedido.enCurso) return pedido;
-  if (pedidoEsperaEnrutarTrasNotificar(pedido.id)) {
+  if (pedidoEsperaEnrutarTrasNotificar(pedido.id) || pedidoEsperaSegundoTelTrasNotificar(pedido.id)) {
     pedido.notificadoEnCamino = true;
     return pedido;
   }
@@ -6786,6 +6805,90 @@ function programarEnrutarTrasNotificacion(indexFinal, pedidoId) {
   } catch (_e) {}
 }
 
+const SEGUNDO_TEL_TRAS_NOTIF_SS_KEY = 'deliverySegundoTelTrasNotif_v1';
+
+function programarSegundoTelefonoTrasNotificacion(indexFinal, pedidoId) {
+  segundoTelTrasNotificacionPendiente = { indexFinal, pedidoId, at: Date.now() };
+  try {
+    sessionStorage.setItem(
+      SEGUNDO_TEL_TRAS_NOTIF_SS_KEY,
+      JSON.stringify(segundoTelTrasNotificacionPendiente)
+    );
+  } catch (_e) {}
+}
+
+function limpiarEsperaSegundoTelTrasNotificacion() {
+  segundoTelTrasNotificacionPendiente = null;
+  try {
+    sessionStorage.removeItem(SEGUNDO_TEL_TRAS_NOTIF_SS_KEY);
+  } catch (_e) {}
+}
+
+function leerPendienteSegundoTelTrasNotif() {
+  let pend = segundoTelTrasNotificacionPendiente;
+  if (!pend) {
+    try {
+      const raw = sessionStorage.getItem(SEGUNDO_TEL_TRAS_NOTIF_SS_KEY);
+      if (raw) pend = JSON.parse(raw);
+    } catch (_e) {
+      pend = null;
+    }
+  }
+  if (!pend || pend.pedidoId == null) return null;
+  const at = Number(pend.at) || 0;
+  if (!at || Date.now() - at > ENRUTAR_TRAS_NOTIF_MAX_MS) return null;
+  return pend;
+}
+
+function pedidoEsperaSegundoTelTrasNotificar(pedidoId) {
+  const pend = leerPendienteSegundoTelTrasNotif();
+  return !!(pend && Number(pend.pedidoId) === Number(pedidoId));
+}
+
+function ofrecerSegundoTelefonoTrasNotificacionSiPendiente() {
+  if (flujoPostCierrePedido) return false;
+  if (hayModalDecisionVisible()) return false;
+  const pend = leerPendienteSegundoTelTrasNotif();
+  if (!pend) {
+    if (segundoTelTrasNotificacionPendiente) limpiarEsperaSegundoTelTrasNotificacion();
+    return false;
+  }
+  const { pedido, indexActual } = obtenerPedidoPorId(pend.pedidoId);
+  if (!pedido || pedido.enCurso || pedido.entregado || pedido.cancelado) {
+    limpiarEsperaSegundoTelTrasNotificacion();
+    return false;
+  }
+  const pendientes = obtenerTelefonosPendientesNotificacionEnCamino(pedido);
+  if (!pendientes.length) {
+    limpiarEsperaSegundoTelTrasNotificacion();
+    return false;
+  }
+  segundoTelTrasNotificacionPendiente = pend;
+  const idx = indexActual >= 0 ? indexActual : Number(pend.indexFinal) || 0;
+  const otro = pendientes[0];
+  const mensaje = construirMensajeNotificarEnCamino(pedido);
+  mostrarModalDecision({
+    titulo: 'Notificar al segundo número',
+    texto: `El pedido #${pedido.id} tiene otro celular: ${otro}.\nSe enviará la misma notificación.`,
+    textoConfirmar: 'Notificar',
+    claseConfirmar: 'btn-notify',
+    mostrarSecundario: false,
+    textoCancelar: 'Cerrar',
+    onConfirmar: () => {
+      persistirNotificacionEnCaminoAntesDeWhatsApp(pedido, otro);
+      limpiarEsperaSegundoTelTrasNotificacion();
+      programarEnrutarTrasNotificacion(idx, pedido.id);
+      abrirWhatsAppNotificarEnCamino(otro, mensaje);
+    },
+    onCancelar: () => {
+      limpiarEsperaSegundoTelTrasNotificacion();
+      programarEnrutarTrasNotificacion(idx, pedido.id);
+      mostrarModalEnrutarTrasNotificacion(idx, pedido.id, { abrirEnrutarDespues: true });
+    }
+  });
+  return true;
+}
+
 function hayModalDecisionVisible() {
   const el = document.getElementById('modalDecision');
   return !!(el && el.style && el.style.display === 'flex');
@@ -7064,8 +7167,12 @@ async function notificarEnCamino(index, pedidoId, opciones = {}) {
   if (directo) {
     const telElegido = tels[0];
     persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, telElegido);
-    programarEnrutarTrasNotificacion(indexFinal, pedidoId);
     abrirWhatsAppNotificarEnCamino(telElegido, mensaje);
+    if (tels.length > 1) {
+      programarSegundoTelefonoTrasNotificacion(indexFinal, pedidoId);
+    } else if (opts.abrirEnrutarDespues) {
+      programarEnrutarTrasNotificacion(indexFinal, pedidoId);
+    }
     return;
   }
 
@@ -7606,6 +7713,7 @@ function normalizarPedidoEnMemoria(p) {
   if (!p.hasOwnProperty('fechaOperacion')) p.fechaOperacion = null;
   if (!p.hasOwnProperty('telefonos')) p.telefonos = [];
   p.nombre = limpiarNombreExtraidoPedido(p.nombre);
+  p.direccion = limpiarDireccionExtraidaPedido(p.direccion);
   if (!Array.isArray(p.telefonos)) p.telefonos = normalizarTelefonosDesdeTexto(String(p.telefonos || ''));
   if (p.telefonos.length === 0 && p.telefono) {
     const legacy = String(p.telefono || '');
@@ -8373,7 +8481,9 @@ async function iniciarApp() {
   renderPedidos();
   window.setTimeout(() => {
     try {
-      ofrecerEnrutarTrasNotificacionSiPendiente();
+      if (!ofrecerSegundoTelefonoTrasNotificacionSiPendiente()) {
+        ofrecerEnrutarTrasNotificacionSiPendiente();
+      }
     } catch (_e) {}
   }, 400);
   requestAnimationFrame(() => {
