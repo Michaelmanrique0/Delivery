@@ -397,13 +397,13 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="app.js?v=20261027dosteldir"></script>
+<script src="app.js?v=20261028elegirtel"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
     // Limpiar SW/caché viejos que dejaban el parser anterior (productos/valor incorrectos).
     var reiniciar = function () {
-      navigator.serviceWorker.register('./sw.js?v=20261027dosteldir').catch(function (err) {
+      navigator.serviceWorker.register('./sw.js?v=20261028elegirtel').catch(function (err) {
         console.warn('[sw] No se pudo registrar:', err);
       });
     };

@@ -1988,12 +1988,12 @@ function notificarVendedorTelefonoInvalido(pedidoId) {
 
 function obtenerTelefonosPedido(pedido) {
   if (!pedido) return [];
+  const partes = [];
   if (Array.isArray(pedido.telefonos) && pedido.telefonos.length) {
-    return pedido.telefonos.map((t) => String(t || '').replace(/\D/g, '')).filter((t) => t.length >= 7);
+    partes.push(pedido.telefonos.join(' '));
   }
-  // Legado: `pedido.telefono` puede venir con dos números en un solo texto.
-  const legacy = normalizarTelefonosDesdeTexto(String(pedido.telefono || ''));
-  return legacy;
+  if (pedido.telefono) partes.push(String(pedido.telefono));
+  return normalizarTelefonosDesdeTexto(partes.join(' '));
 }
 
 function textoTelefonosPedidoParaUI(pedido) {
@@ -2071,9 +2071,10 @@ function seleccionarTelefonoConModal(tels, titulo, onElegir) {
   }
   const a = telefonos[0];
   const b = telefonos[1];
+  const esNotificar = /notific/i.test(String(titulo || ''));
   mostrarModalDecision({
     titulo: titulo || 'Contacto',
-    texto: '¿A cuál número deseas hacerlo?',
+    texto: esNotificar ? '¿A cuál número deseas notificar?' : '¿A cuál número deseas llamar o escribir?',
     textoConfirmar: a,
     claseConfirmar: 'btn-primary',
     textoSecundario: b,
@@ -7138,16 +7139,33 @@ function construirMensajeNotificarEnCamino(pedido) {
   return partes.join('\n');
 }
 
+function continuarTrasAbrirWhatsAppNotificacion(indexFinal, pedidoId, pedidoFinal, opts) {
+  const pendientes = obtenerTelefonosPendientesNotificacionEnCamino(pedidoFinal);
+  if (pendientes.length > 0) {
+    programarSegundoTelefonoTrasNotificacion(indexFinal, pedidoId);
+    window.setTimeout(() => {
+      try {
+        ofrecerSegundoTelefonoTrasNotificacionSiPendiente();
+      } catch (_e) {}
+    }, 500);
+    return;
+  }
+  if (opts && opts.abrirEnrutarDespues) {
+    programarEnrutarTrasNotificacion(indexFinal, pedidoId);
+    window.setTimeout(() => {
+      try {
+        ofrecerEnrutarTrasNotificacionSiPendiente();
+      } catch (_e) {}
+    }, 500);
+  }
+}
+
 async function notificarEnCamino(index, pedidoId, opciones = {}) {
   const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal) return;
 
-  const desdeSiguiente = !!opciones.omitirAvisoYaNotificado;
-  const directo = opciones.directoWhatsApp !== false || desdeSiguiente;
-  // Primera notificación de este aviso (o botón Notificar): ir a WhatsApp,
-  // nunca preguntar si ya se notificó y se quiere volver a enviar.
   limpiarNotificacionEnCaminoPedido(pedidoFinal);
 
   const tels = obtenerTelefonosPedido(pedidoFinal);
@@ -7164,29 +7182,18 @@ async function notificarEnCamino(index, pedidoId, opciones = {}) {
   const mensaje = construirMensajeNotificarEnCamino(pedidoFinal);
   const opts = { abrirEnrutarDespues: true, ...opciones };
 
-  if (directo) {
-    const telElegido = tels[0];
+  const enviarA = (telElegido) => {
     persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, telElegido);
     abrirWhatsAppNotificarEnCamino(telElegido, mensaje);
-    if (tels.length > 1) {
-      programarSegundoTelefonoTrasNotificacion(indexFinal, pedidoId);
-    } else if (opts.abrirEnrutarDespues) {
-      programarEnrutarTrasNotificacion(indexFinal, pedidoId);
-    }
+    continuarTrasAbrirWhatsAppNotificacion(indexFinal, pedidoId, pedidoFinal, opts);
+  };
+
+  if (tels.length < 2) {
+    enviarA(tels[0]);
     return;
   }
 
-  if (tieneNotificacionEnCaminoParcial(pedidoFinal)) {
-    ejecutarNotificacionEnCaminoParcial(indexFinal, pedidoId, pedidoFinal, opts, mensaje);
-    return;
-  }
-
-  seleccionarTelefonoConModal(tels, 'Notificación', (telElegido) => {
-    persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, telElegido);
-    programarEnrutarTrasNotificacion(indexFinal, pedidoId);
-    abrirWhatsAppNotificarEnCamino(telElegido, mensaje);
-    continuarFlujoNotificacionEnCaminoTrasUno(indexFinal, pedidoId, pedidoFinal, opts, mensaje);
-  });
+  seleccionarTelefonoConModal(tels, 'Notificar', enviarA);
 }
 
 // --- Mapa: marcadores y ruta ---
