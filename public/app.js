@@ -1758,57 +1758,51 @@ function abrirWhatsAppPreferirApp(telefono, mensaje) {
 
 // --- Teléfonos múltiples ---
 
-function normalizarTelefonosDesdeTexto(raw) {
-  const s = String(raw || '').trim();
-  if (!s) return [];
+const LONGITUD_TELEFONO_LOCAL = 10;
 
-  // Extrae todos los "bloques" que parezcan teléfono; luego deja solo dígitos.
-  const matches = s.match(/\+?[\d\s().-]{7,}/g) || [];
-  const out = [];
-  const seen = new Set();
-  for (const m of matches) {
-    let t = String(m || '').trim();
-    if (!t) continue;
-    if (t.startsWith('+')) t = t.slice(1);
-    t = t.replace(/\D/g, '');
-    if (t.length < 7) continue;
-    if (!seen.has(t)) {
-      seen.add(t);
-      out.push(t);
-    }
+function claveUnicaTelefonoPedido(tel) {
+  let d = String(tel || '').replace(/\D/g, '');
+  if (!d) return '';
+  while (d.startsWith('57') && d.length > LONGITUD_TELEFONO_LOCAL) {
+    d = d.slice(2);
   }
+  return d;
+}
 
-  // Heurística para casos donde antes se concatenaron dos teléfonos sin separador.
-  // Ej: "30246933943147153587" (20 dígitos) -> ["3024693394","3147153587"].
-  if (out.length === 1) {
-    const solo = out[0];
-    if (/^\d+$/.test(solo) && solo.length >= 14) {
-      const partes = [];
-      const pushChunks = (chunkLen) => {
-        if (solo.length % chunkLen !== 0) return false;
-        for (let i = 0; i < solo.length; i += chunkLen) {
-          partes.push(solo.slice(i, i + chunkLen));
-        }
-        return partes.length >= 2;
-      };
-
-      // 12 dígitos: 57 + 10 (WhatsApp); 10 dígitos: celular local.
-      if (pushChunks(12) || pushChunks(10)) {
-        const out2 = [];
-        const seen2 = new Set();
-        for (const p of partes) {
-          const t = String(p || '').replace(/\D/g, '');
-          if (t.length < 7) continue;
-          if (!seen2.has(t)) { seen2.add(t); out2.push(t); }
-        }
-        if (out2.length >= 2) return out2;
-      }
-    }
+function uniquificarTelefonosLista(lista) {
+  const vistos = new Set();
+  const out = [];
+  for (const raw of Array.isArray(lista) ? lista : []) {
+    const d = claveUnicaTelefonoPedido(raw);
+    if (d.length < 7) continue;
+    if (vistos.has(d)) continue;
+    vistos.add(d);
+    out.push(d);
   }
   return out;
 }
 
-const LONGITUD_TELEFONO_LOCAL = 10;
+function normalizarTelefonosDesdeTexto(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return [];
+
+  const bloques = [];
+  const matches = s.match(/\d{7,}/g) || [];
+  for (const m of matches) {
+    const t = String(m || '').replace(/\D/g, '');
+    if (t.length < 7) continue;
+    if (t.length >= 14 && t.length % 10 === 0) {
+      for (let i = 0; i < t.length; i += 10) bloques.push(t.slice(i, i + 10));
+      continue;
+    }
+    if (t.length >= 14 && t.length % 12 === 0) {
+      for (let i = 0; i < t.length; i += 12) bloques.push(t.slice(i, i + 12));
+      continue;
+    }
+    bloques.push(t);
+  }
+  return uniquificarTelefonosLista(bloques);
+}
 
 function digitosTelefonoLocalCelular(raw) {
   let d = String(raw || '').replace(/\D/g, '');
@@ -1993,7 +1987,7 @@ function obtenerTelefonosPedido(pedido) {
     partes.push(pedido.telefonos.join(' '));
   }
   if (pedido.telefono) partes.push(String(pedido.telefono));
-  return normalizarTelefonosDesdeTexto(partes.join(' '));
+  return uniquificarTelefonosLista(normalizarTelefonosDesdeTexto(partes.join(' ')));
 }
 
 function textoTelefonosPedidoParaUI(pedido) {
@@ -2015,10 +2009,7 @@ function htmlTelefonosPedidoParaTarjeta(pedido) {
 }
 
 function claveTelefonoNotificacion(tel) {
-  let d = String(tel || '').replace(/\D/g, '');
-  if (!d) return '';
-  if (d.startsWith('57') && d.length > 10) d = d.slice(2);
-  return d;
+  return claveUnicaTelefonoPedido(tel);
 }
 
 function obtenerTelefonosNotificadosEnCamino(pedido) {
@@ -2060,7 +2051,7 @@ function completarNotificacionEnCaminoPedido(pedido) {
 }
 
 function seleccionarTelefonoConModal(tels, titulo, onElegir) {
-  const telefonos = (Array.isArray(tels) ? tels : []).filter(Boolean);
+  const telefonos = uniquificarTelefonosLista(tels);
   if (telefonos.length === 0) {
     mostrarAvisoEnApp('No hay número de teléfono disponible', titulo || 'Contacto');
     return;
@@ -7188,12 +7179,7 @@ async function notificarEnCamino(index, pedidoId, opciones = {}) {
     continuarTrasAbrirWhatsAppNotificacion(indexFinal, pedidoId, pedidoFinal, opts);
   };
 
-  if (tels.length < 2) {
-    enviarA(tels[0]);
-    return;
-  }
-
-  seleccionarTelefonoConModal(tels, 'Notificar', enviarA);
+  enviarA(tels[0]);
 }
 
 // --- Mapa: marcadores y ruta ---
@@ -7721,15 +7707,9 @@ function normalizarPedidoEnMemoria(p) {
   if (!p.hasOwnProperty('telefonos')) p.telefonos = [];
   p.nombre = limpiarNombreExtraidoPedido(p.nombre);
   p.direccion = limpiarDireccionExtraidaPedido(p.direccion);
-  if (!Array.isArray(p.telefonos)) p.telefonos = normalizarTelefonosDesdeTexto(String(p.telefonos || ''));
-  if (p.telefonos.length === 0 && p.telefono) {
-    const legacy = String(p.telefono || '');
-    const tels = normalizarTelefonosDesdeTexto(legacy);
-    if (tels.length) p.telefonos = tels;
-  }
-  if ((!p.telefono || String(p.telefono).trim() === '') && Array.isArray(p.telefonos) && p.telefonos.length) {
-    p.telefono = p.telefonos[0];
-  }
+  const telsUnicos = obtenerTelefonosPedido(p);
+  p.telefonos = telsUnicos;
+  p.telefono = telsUnicos.length ? (telsUnicos.length === 1 ? telsUnicos[0] : telsUnicos.join(' - ')) : (p.telefono || '');
   if (p.entregado) {
     p.enCurso = false;
     p.llegoDestino = false;
