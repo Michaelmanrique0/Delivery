@@ -3535,8 +3535,10 @@ function crearTarjetaPedido(pedido, index) {
     : '';
   const etapaActual = obtenerEtapaPedidoUI(pedido);
   let btnRegresarEtapaHtml = '';
-  if (etapaActual === 'enRuta' || etapaActual === 'enDestino') {
+  if (etapaActual === 'enRuta') {
     btnRegresarEtapaHtml = `<button type="button" class="btn-info" onclick="marcarPendiente(${index})"><i class="fa-solid fa-rotate-left"></i> Regresar a pendientes</button>`;
+  } else if (etapaActual === 'enDestino') {
+    btnRegresarEtapaHtml = `<button type="button" class="btn-info" onclick="marcarRegresarAEnRuta(${index})"><i class="fa-solid fa-rotate-left"></i> Regresar a en ruta</button>`;
   } else if (etapaActual === 'finalizado') {
     btnRegresarEtapaHtml = `<button type="button" class="btn-info" onclick="marcarRegresarAEnRuta(${index})" style="width:100%;"><i class="fa-solid fa-rotate-left"></i> Regresar a en ruta</button>`;
   }
