@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="icon.svg">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-<link rel="stylesheet" href="style.css?v=20261006histmensajero">
+<link rel="stylesheet" href="style.css?v=20261031editartel">
 <script>
 (function () {
   try {
@@ -397,13 +397,13 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="app.js?v=20261031tel10digitos"></script>
+<script src="app.js?v=20261031editartel"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
     // Limpiar SW/caché viejos que dejaban el parser anterior (productos/valor incorrectos).
     var reiniciar = function () {
-      navigator.serviceWorker.register('./sw.js?v=20261031tel10digitos').catch(function (err) {
+      navigator.serviceWorker.register('./sw.js?v=20261031editartel').catch(function (err) {
         console.warn('[sw] No se pudo registrar:', err);
       });
     };

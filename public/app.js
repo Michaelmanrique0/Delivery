@@ -1783,7 +1783,7 @@ function uniquificarTelefonosLista(lista) {
 }
 
 function unirDigitosTelefonoSeparados(texto) {
-  let unido = String(texto || '');
+  let unido = String(texto || '').replace(/[\u00A0\u202F\u2007\u2009]/g, ' ');
   let prev = '';
   while (unido !== prev) {
     prev = unido;
@@ -1812,6 +1812,24 @@ function normalizarTelefonosDesdeTexto(raw) {
     bloques.push(t);
   }
   return uniquificarTelefonosLista(bloques);
+}
+
+function telefonosDesdeCampoEdicion(texto) {
+  const n = normalizarTelefonosDesdeTexto(texto);
+  if (n.length) return n;
+  let d = String(texto || '').replace(/\D/g, '');
+  if (!d) return [];
+  while (d.startsWith('57') && d.length > LONGITUD_TELEFONO_LOCAL && d.length % LONGITUD_TELEFONO_LOCAL !== 0) {
+    d = d.slice(2);
+  }
+  if (d.length >= LONGITUD_TELEFONO_LOCAL && d.length % LONGITUD_TELEFONO_LOCAL === 0) {
+    const bloques = [];
+    for (let i = 0; i < d.length; i += LONGITUD_TELEFONO_LOCAL) {
+      bloques.push(d.slice(i, i + LONGITUD_TELEFONO_LOCAL));
+    }
+    return uniquificarTelefonosLista(bloques);
+  }
+  return n;
 }
 
 function digitosTelefonoLocalCelular(raw) {
@@ -3612,7 +3630,7 @@ function crearTarjetaPedido(pedido, index) {
     <div class="pedido-header">
       <div class="pedido-numero">Pedido #${pedido.id}${estadoTexto}</div>
       <div class="pedido-header-btns">
-        ${adminUi && !pedido.cancelado ? `<button class="btn-edit" onclick="editarPedido(${index})" style="padding: 5px 10px; font-size: 12px;"><i class="fa-solid fa-pen-to-square"></i> Editar</button>` : ''}
+        ${adminUi && !pedido.cancelado ? `<button type="button" class="btn-edit" onclick="event.preventDefault(); event.stopPropagation(); editarPedido(${index})" style="padding: 5px 10px; font-size: 12px;"><i class="fa-solid fa-pen-to-square"></i> Editar</button>` : ''}
         ${adminUi ? `<button class="btn-danger btn-icon-only" onclick="eliminarPedido(${index})" title="Eliminar pedido" aria-label="Eliminar pedido"><i class="fa-solid fa-trash"></i></button>` : ''}
       </div>
     </div>
@@ -3646,7 +3664,18 @@ function crearTarjetaPedido(pedido, index) {
     ${btnNoEntregadoHtml}
   `;
 
-  div.addEventListener('dragstart', handleDragStart);
+  div.addEventListener('mousedown', (e) => {
+    const enControl = e.target && e.target.closest && e.target.closest('button, input, textarea, select, a, .pedido-header-btns');
+    div.draggable = !enControl && !pedido.entregado && !pedido.cancelado;
+  });
+  div.addEventListener('dragstart', (e) => {
+    const sel = typeof window.getSelection === 'function' ? window.getSelection() : null;
+    if (sel && String(sel.toString() || '').trim()) {
+      e.preventDefault();
+      return;
+    }
+    handleDragStart.call(div, e);
+  });
   div.addEventListener('dragover', handleDragOver);
   div.addEventListener('drop', handleDrop);
   div.addEventListener('dragend', handleDragEnd);
@@ -4114,7 +4143,7 @@ function handleDragStart(e) {
     e.preventDefault();
     return;
   }
-  if (e.target && e.target.closest && e.target.closest('.orden-flecha')) {
+  if (e.target && e.target.closest && e.target.closest('.orden-flecha, button, input, textarea, select, a, .pedido-header-btns')) {
     e.preventDefault();
     return;
   }
@@ -4423,7 +4452,10 @@ let edicionPedidoPendiente = { index: null };
 
 function asegurarModalEditarPedido() {
   let modal = document.getElementById('modalEditarPedido');
-  if (modal && document.getElementById('editarPedidoNumero')) return modal;
+  const telExistente = document.getElementById('editarPedidoTelefono');
+  if (modal && document.getElementById('editarPedidoNumero') && telExistente && telExistente.tagName === 'TEXTAREA') {
+    return modal;
+  }
   if (modal) {
     modal.remove();
     modal = null;
@@ -4441,8 +4473,8 @@ function asegurarModalEditarPedido() {
         <input id="editarPedidoNumero" type="number" inputmode="numeric" min="1" step="1" class="modal-editar-pedido-input">
         <label class="modal-editar-pedido-label" for="editarPedidoNombre">Nombre</label>
         <input id="editarPedidoNombre" type="text" autocomplete="name" class="modal-editar-pedido-input">
-        <label class="modal-editar-pedido-label" for="editarPedidoTelefono">Teléfono</label>
-        <input id="editarPedidoTelefono" type="text" inputmode="tel" autocomplete="tel" class="modal-editar-pedido-input">
+        <label class="modal-editar-pedido-label" for="editarPedidoTelefono">Teléfono (10 dígitos; si hay dos, sepáralos con un guión)</label>
+        <textarea id="editarPedidoTelefono" class="modal-editar-pedido-textarea" rows="2" inputmode="tel" autocomplete="tel" spellcheck="false" placeholder="Ej: 300 6023101 - 317 0775366"></textarea>
         <label class="modal-editar-pedido-label" for="editarPedidoDireccion">Dirección</label>
         <textarea id="editarPedidoDireccion" class="modal-editar-pedido-textarea" rows="3" spellcheck="true" placeholder="Dirección completa del pedido"></textarea>
         <label class="modal-editar-pedido-label" for="editarPedidoProductos">Productos (uno por línea)</label>
@@ -4459,9 +4491,11 @@ function asegurarModalEditarPedido() {
     </div>
   `;
   document.body.appendChild(modal);
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) cerrarModalEditarPedido();
-  });
+  const card = modal.querySelector('.modal-editar-pedido-card');
+  if (card) {
+    card.addEventListener('mousedown', (e) => e.stopPropagation());
+    card.addEventListener('click', (e) => e.stopPropagation());
+  }
   const v = document.getElementById('editarPedidoValor');
   if (v) vincularFormateoMilesInput(v);
   return modal;
@@ -4475,10 +4509,13 @@ function cerrarModalEditarPedido() {
 }
 
 function guardarEdicionPedido() {
-  const { index } = edicionPedidoPendiente;
-  const pedido = pedidos[index];
+  const { index, pedidoId } = edicionPedidoPendiente;
+  let pedido = Number.isInteger(index) ? pedidos[index] : null;
+  if (pedidoId != null && (!pedido || Number(pedido.id) !== Number(pedidoId))) {
+    pedido = pedidos.find((p) => p && Number(p.id) === Number(pedidoId)) || null;
+  }
   if (!pedido) {
-    cerrarModalEditarPedido();
+    mostrarAvisoEnApp('No se pudo guardar: vuelve a abrir Editar e intenta de nuevo.', 'Editar pedido');
     return;
   }
 
@@ -4514,9 +4551,16 @@ function guardarEdicionPedido() {
 
   pedido.nombre = inputNombre ? String(inputNombre.value || '').trim() : '';
   const telTexto = inputTel ? String(inputTel.value || '').trim() : '';
-  const tels = normalizarTelefonosDesdeTexto(telTexto);
+  const tels = telefonosDesdeCampoEdicion(telTexto);
+  if (telTexto && !tels.length) {
+    mostrarAvisoEnApp(
+      'El teléfono debe quedar con 10 dígitos. El espacio se ignora (ej: 300 6023101 → 3006023101). Si hay dos números, sepáralos con un guión.',
+      'Teléfono'
+    );
+    return;
+  }
   pedido.telefonos = tels;
-  pedido.telefono = tels[0] || telTexto;
+  pedido.telefono = tels.length <= 1 ? (tels[0] || '') : tels.join(' - ');
   pedido.direccion = inputDir ? String(inputDir.value || '').trim() : '';
   if (taProd) {
     pedido.productos = productosPedidoDesdeTextoPlano(taProd.value);
@@ -4553,7 +4597,7 @@ function editarPedido(index) {
   }
   const pedido = pedidos[index];
   if (!pedido) return;
-  edicionPedidoPendiente = { index };
+  edicionPedidoPendiente = { index, pedidoId: pedido.id };
   const modal = asegurarModalEditarPedido();
   const inputNumero = document.getElementById('editarPedidoNumero');
   const inputNombre = document.getElementById('editarPedidoNombre');

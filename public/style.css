@@ -1401,6 +1401,8 @@ button i,
   border-radius: 8px;
   font-size: 15px;
   box-sizing: border-box;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .modal-editar-pedido-textarea {
@@ -1408,6 +1410,12 @@ button i,
   min-height: 100px;
   font-family: inherit;
   line-height: 1.4;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+#editarPedidoTelefono {
+  min-height: 64px;
 }
 
 .modal-editar-pedido-acciones {
