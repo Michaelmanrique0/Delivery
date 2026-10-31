@@ -1774,7 +1774,7 @@ function uniquificarTelefonosLista(lista) {
   const out = [];
   for (const raw of Array.isArray(lista) ? lista : []) {
     const d = claveUnicaTelefonoPedido(raw);
-    if (d.length < 7) continue;
+    if (d.length !== LONGITUD_TELEFONO_LOCAL) continue;
     if (vistos.has(d)) continue;
     vistos.add(d);
     out.push(d);
@@ -1782,8 +1782,18 @@ function uniquificarTelefonosLista(lista) {
   return out;
 }
 
+function unirDigitosTelefonoSeparados(texto) {
+  let unido = String(texto || '');
+  let prev = '';
+  while (unido !== prev) {
+    prev = unido;
+    unido = unido.replace(/(\d)[\s.\-()]+(\d)/g, '$1$2');
+  }
+  return unido;
+}
+
 function normalizarTelefonosDesdeTexto(raw) {
-  const s = String(raw || '').trim();
+  const s = unirDigitosTelefonoSeparados(String(raw || '').trim());
   if (!s) return [];
 
   const bloques = [];
