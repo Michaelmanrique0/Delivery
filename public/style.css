@@ -296,28 +296,30 @@ button {
   height: 34px;
   min-width: 34px;
   min-height: 34px;
-  padding: 0;
-  margin: 0;
+  padding: 0 !important;
+  margin: 0 !important;
   display: grid;
   place-items: center;
   line-height: 0;
-  background: #dc2626;
+  overflow: hidden;
+  background: var(--triad-c);
 }
 
 .btn-icon-only:hover {
-  background: #b91c1c;
+  background: var(--triad-c-dark);
 }
 
 .btn-icon-only i,
 .btn-icon-only .icon-ui,
 .btn-icon-only svg,
 .btn-icon-only [data-lucide] {
-  margin: 0;
-  padding: 0;
+  margin: 0 !important;
+  padding: 0 !important;
   display: block;
   vertical-align: 0;
-  width: 18px;
-  height: 18px;
+  width: 17px;
+  height: 17px;
+  transform: translateX(1px);
 }
 
 .btn-warning {
@@ -474,9 +476,9 @@ button.fab-app-btn[data-lucide] {
 }
 
 .pedido.entregado {
-  background: #e8edf2;
-  border-left-color: #757575;
-  opacity: 0.85;
+  background: var(--surface-2);
+  border-left-color: var(--text-muted);
+  opacity: 1;
 }
 
 .pedido.en-curso {
@@ -484,14 +486,18 @@ button.fab-app-btn[data-lucide] {
 }
 
 .pedido.cancelado {
-  background: #fff7ed;
+  background: color-mix(in srgb, var(--surface) 88%, #ea580c 12%);
   border-left-color: #ea580c;
-  opacity: 0.9;
+  opacity: 1;
   cursor: default;
 }
 
 .pedido.cancelado .pedido-numero {
-  color: #9a3412;
+  color: #c2410c;
+}
+
+html.dark .pedido.cancelado .pedido-numero {
+  color: #fdba74;
 }
 
 .pedido.cancelado .pedido-tools {
@@ -499,12 +505,14 @@ button.fab-app-btn[data-lucide] {
 }
 
 .pedido.entregado .pedido-numero {
-  color: #616161;
+  color: var(--text-muted);
 }
 
+.pedido.entregado .pedido-cliente,
 .pedido.entregado .pedido-info,
-.pedido.entregado .pedido-info strong {
-  color: #757575;
+.pedido.entregado .pedido-info strong,
+.pedido.entregado .pedido-fila-valor strong {
+  color: var(--text-muted);
 }
 
 .pedido.entregado:hover {
@@ -656,13 +664,13 @@ button.fab-app-btn[data-lucide] {
 .pedido-numero {
   font-size: 24px;
   font-weight: bold;
-  color: var(--triad-a);
+  color: var(--accent);
 }
 
 .pedido-cliente {
   font-size: 22px;
   font-weight: 700;
-  color: #1f2933;
+  color: var(--text);
   margin: 4px 0 10px;
   line-height: 1.2;
 }
@@ -670,11 +678,12 @@ button.fab-app-btn[data-lucide] {
 .pedido-info {
   margin: 10px 0;
   line-height: 1.6;
+  color: var(--text);
 }
 
 .pedido-info strong {
-  color: #333;
-  font-weight: 600;
+  color: var(--text-muted);
+  font-weight: 650;
 }
 
 /* Lista bajo la etiqueta; sin <br> tras "Productos:" para no duplicar salto en móvil (strong en bloque). */
@@ -693,12 +702,12 @@ button.fab-app-btn[data-lucide] {
 }
 
 .pedido-fila-valor strong {
-  color: #333;
-  font-weight: 600;
+  color: var(--text-muted);
+  font-weight: 650;
 }
 
 .pedido-valor-modificado {
-  color: #b45309;
+  color: var(--triad-b);
   font-size: 0.92em;
   font-weight: 600;
 }
@@ -707,14 +716,15 @@ button.fab-app-btn[data-lucide] {
   margin: 0 0 0 8px;
   padding: 4px 8px;
   font-size: 12px;
-  background: #e7ecf1;
-  color: var(--triad-a-dark);
-  border: 1px solid #c9d3dc;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--border);
   border-radius: 5px;
 }
 
 .btn-copy-inline:hover {
-  background: #dbe4ec;
+  background: var(--surface-2);
+  color: var(--accent-hover);
 }
 
 .pedido-tools {
