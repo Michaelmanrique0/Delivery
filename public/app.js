@@ -3293,7 +3293,7 @@ function renderPedidos() {
     const subVacio = esSesionMensajero()
       ? 'Aún no tienes pedidos asignados. Cuando un administrador te asigne entregas, aparecerán aquí y podrás ordenar la ruta en el mapa.'
       : 'Pega un pedido desde WhatsApp en el cuadro de arriba.';
-    lista.innerHTML = `<div class="empty-state" id="emptyState"><p>No hay pedidos aún</p><p style="font-size: 14px;">${escapeHtmlAttr(subVacio)}</p></div>`;
+    lista.innerHTML = `<div class="empty-state" id="emptyState"><p>No hay pedidos aún</p><p class="text-sm">${escapeHtmlAttr(subVacio)}</p></div>`;
     actualizarPestañasListaPedidos([], [], [], []);
     const elResumenVacio = document.getElementById('totalesResumen');
     if (elResumenVacio) elResumenVacio.style.display = 'none';
@@ -3388,7 +3388,7 @@ function renderPedidos() {
         totales.recogidoDelDia > 0 || totales.pagoDomiciliario > 0 ? 'inline-flex' : 'none';
     if (itemTotalDelDia)
       itemTotalDelDia.style.display = totales.totalDelDia > 0 ? 'inline-flex' : 'none';
-    elResumen.style.display = totales.hayDatos ? 'flex' : 'none';
+    elResumen.style.display = totales.hayDatos ? 'grid' : 'none';
   }
 
   renderPanelLinksMapsPendientes();

@@ -3,16 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#0f172a">
+<meta name="theme-color" content="#f8fafc">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Gestión de Pedidos - Delivery App</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="tailwind.css?v=20261106ui">
-<link rel="stylesheet" href="style.css?v=20261106ui">
+<link rel="stylesheet" href="tailwind.css?v=20261106bento">
+<link rel="stylesheet" href="style.css?v=20261106bento">
 <script>
+(function () {
+  try {
+    var t = localStorage.getItem('deliveryTheme');
+    var dark = t === 'dark' || (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    if (dark) document.documentElement.classList.add('dark');
+  } catch (_e) {}
+})();
 (function () {
   try {
     if (sessionStorage.getItem('deliveryVistaApp') !== 'usuarios-roles') return;
@@ -30,70 +37,71 @@
 </script>
 </head>
 
-<body class="font-sans antialiased bg-slate-100 text-slate-800">
+<body class="min-h-dvh bg-slate-50 font-sans antialiased text-slate-800 dark:bg-zinc-950 dark:text-zinc-100">
 
-<a href="#listaPedidos" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[20000] focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-brand focus:shadow">Saltar a la lista de pedidos</a>
+<a href="#listaPedidos" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[20000] focus:rounded-2xl focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-violet-600 focus:shadow-lg dark:focus:bg-zinc-900">Saltar a la lista de pedidos</a>
 
 <div id="bannerOffline" class="banner-offline" style="display:none;" role="status" aria-live="polite">
   Sin internet — se muestran los pedidos guardados en este dispositivo. Los cambios se sincronizarán al recuperar conexión.
 </div>
 
-<div id="pantallaAuth" class="pantalla-auth min-h-dvh w-full" style="display:none;">
-  <div class="auth-card">
+<div id="pantallaAuth" class="pantalla-auth flex min-h-dvh w-full items-center justify-center px-4 py-10" style="display:none;">
+  <div class="auth-card bento-card w-full max-w-md p-8 sm:p-10">
+    <p class="mb-2 text-center text-xs font-semibold uppercase tracking-[0.2em] text-violet-600 dark:text-violet-400">Delivery</p>
     <div id="authBloquePrincipal">
-      <h1 class="auth-titulo">Gestión de pedidos</h1>
+      <h1 class="auth-titulo text-center text-2xl font-semibold tracking-tight">Gestión de pedidos</h1>
       <p id="authErrorGlobal" class="auth-error-global" role="alert"></p>
-      <div class="auth-tabs" role="tablist">
-        <button type="button" id="authTabLogin" class="auth-tab active" role="tab" aria-selected="true" aria-controls="formLogin">Iniciar sesión</button>
-        <button type="button" id="authTabRegistro" class="auth-tab" role="tab" aria-selected="false" aria-controls="formRegistro">Registro</button>
+      <div class="auth-tabs mb-6 grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1 dark:bg-zinc-800" role="tablist">
+        <button type="button" id="authTabLogin" class="auth-tab active rounded-xl px-3 py-2.5 text-sm font-semibold" role="tab" aria-selected="true" aria-controls="formLogin">Iniciar sesión</button>
+        <button type="button" id="authTabRegistro" class="auth-tab rounded-xl px-3 py-2.5 text-sm font-semibold" role="tab" aria-selected="false" aria-controls="formRegistro">Registro</button>
       </div>
       <p id="authFormError" class="auth-form-error" role="alert"></p>
-      <form id="formLogin" class="auth-form auth-form--stacked" autocomplete="on" aria-label="Iniciar sesión">
+      <form id="formLogin" class="auth-form auth-form--stacked space-y-5" autocomplete="on" aria-label="Iniciar sesión">
         <div class="auth-field-group">
           <label for="loginIdentifier">Correo electrónico</label>
-          <input id="loginIdentifier" name="email" type="email" inputmode="email" autocomplete="email" required>
+          <input id="loginIdentifier" class="ui-input" name="email" type="email" inputmode="email" autocomplete="email" required>
         </div>
         <div class="auth-field-group">
           <label for="loginPass">Contraseña</label>
-          <input id="loginPass" name="password" type="password" autocomplete="current-password" required>
+          <input id="loginPass" class="ui-input" name="password" type="password" autocomplete="current-password" required>
           <label class="auth-check-row" for="loginMostrarPass">
             <input type="checkbox" id="loginMostrarPass" autocomplete="off">
             <span>Mostrar contraseña</span>
           </label>
         </div>
-        <button type="submit" class="btn-primary auth-submit">Entrar</button>
+        <button type="submit" class="btn-primary auth-submit w-full rounded-2xl">Entrar</button>
         <button type="button" class="auth-link-btn" id="btnRecuperarClave">Recuperar contraseña</button>
       </form>
-      <form id="formRegistro" class="auth-form auth-form--stacked" style="display:none;" autocomplete="on" aria-label="Crear cuenta">
+      <form id="formRegistro" class="auth-form auth-form--stacked space-y-5" style="display:none;" autocomplete="on" aria-label="Crear cuenta">
         <div class="auth-field-group">
           <label id="regUserLabel" for="regUser">Nombre en la app</label>
-          <input id="regUser" type="text" autocomplete="nickname" required minlength="1">
+          <input id="regUser" class="ui-input" type="text" autocomplete="nickname" required minlength="1">
         </div>
         <div class="auth-field-group">
           <label for="regEmail">Correo electrónico</label>
-          <input id="regEmail" type="email" inputmode="email" autocomplete="email" required>
+          <input id="regEmail" class="ui-input" type="email" inputmode="email" autocomplete="email" required>
         </div>
         <div class="auth-field-group">
           <label for="regPass">Contraseña</label>
-          <input id="regPass" type="password" autocomplete="new-password" required minlength="6">
+          <input id="regPass" class="ui-input" type="password" autocomplete="new-password" required minlength="6">
         </div>
-        <button type="submit" id="regSubmitBtn" class="btn-primary auth-submit">Crear cuenta</button>
+        <button type="submit" id="regSubmitBtn" class="btn-primary auth-submit w-full rounded-2xl">Crear cuenta</button>
       </form>
     </div>
     <div id="authBloqueReset" class="auth-bloque-reset" style="display:none;">
       <h2 class="auth-subtitulo">Nueva contraseña</h2>
       <p class="auth-hint">Elige una contraseña nueva para tu cuenta.</p>
       <p id="authResetError" class="auth-form-error" role="alert"></p>
-      <div class="auth-form auth-form--stacked">
+      <div class="auth-form auth-form--stacked space-y-5">
         <div class="auth-field-group">
           <label for="resetPassNueva">Nueva contraseña</label>
-          <input id="resetPassNueva" type="password" autocomplete="new-password" minlength="6" required>
+          <input id="resetPassNueva" class="ui-input" type="password" autocomplete="new-password" minlength="6" required>
         </div>
         <div class="auth-field-group">
           <label for="resetPassNueva2">Confirmar contraseña</label>
-          <input id="resetPassNueva2" type="password" autocomplete="new-password" minlength="6" required>
+          <input id="resetPassNueva2" class="ui-input" type="password" autocomplete="new-password" minlength="6" required>
         </div>
-        <button type="button" id="btnGuardarResetPass" class="btn-primary auth-submit">Guardar y entrar</button>
+        <button type="button" id="btnGuardarResetPass" class="btn-primary auth-submit w-full rounded-2xl">Guardar y entrar</button>
         <button type="button" class="auth-link-btn" id="btnCancelarReset">Volver al inicio de sesión</button>
       </div>
     </div>
@@ -101,14 +109,14 @@
 </div>
 
 <div id="appLoadingOverlay" class="app-loading-overlay" style="display:none;" aria-hidden="true">
-  <div class="app-loading-card" role="status" aria-live="polite">
+  <div class="app-loading-card bento-card" role="status" aria-live="polite">
     <div class="app-loading-spinner" aria-hidden="true"></div>
     <div class="app-loading-text">Cargando pedidos, por favor espera...</div>
   </div>
 </div>
 
 <div id="modalRecuperarClave" class="modal-no-entregado-backdrop" style="display:none;" aria-hidden="true">
-  <div class="modal-no-entregado-card auth-modal-recuperar">
+  <div class="modal-no-entregado-card auth-modal-recuperar bento-card">
     <h3>Recuperar contraseña</h3>
     <p id="modalRecuperarAyuda" class="auth-modal-ayuda">Escribe tu correo y comprueba si está registrado. Si existe, podrás actualizar la contraseña.</p>
     <p id="modalRecuperarError" class="auth-form-error" role="alert"></p>
@@ -116,62 +124,68 @@
     <div id="modalRecuperarBloqueCorreo">
       <div class="auth-field-group">
         <label for="recuperarEmail">Correo electrónico</label>
-        <input id="recuperarEmail" type="email" autocomplete="email">
+        <input id="recuperarEmail" class="ui-input" type="email" autocomplete="email">
       </div>
     </div>
     <div id="modalRecuperarBloqueExiste" style="display:none;">
       <p class="auth-hint" id="modalRecuperarHintExiste">Correo registrado. Continúa para restablecer la contraseña.</p>
       <div class="auth-modal-acciones auth-modal-acciones--stack">
-        <button type="button" class="btn-primary" id="btnModalActualizarPass" style="display:none;">Actualizar contraseña</button>
+        <button type="button" class="btn-primary rounded-2xl" id="btnModalActualizarPass" style="display:none;">Actualizar contraseña</button>
         <button type="button" class="auth-link-btn" id="btnModalRecuperarOtraCuenta">Usar otro correo</button>
       </div>
     </div>
     <div id="modalRecuperarBloqueNuevaPass" class="auth-form auth-form--stacked" style="display:none;">
       <div class="auth-field-group">
         <label for="modalRecuperarPass1">Nueva contraseña</label>
-        <input id="modalRecuperarPass1" type="password" autocomplete="new-password" minlength="6" required>
+        <input id="modalRecuperarPass1" class="ui-input" type="password" autocomplete="new-password" minlength="6" required>
       </div>
       <div class="auth-field-group">
         <label for="modalRecuperarPass2">Confirmar contraseña</label>
-        <input id="modalRecuperarPass2" type="password" autocomplete="new-password" minlength="6" required>
+        <input id="modalRecuperarPass2" class="ui-input" type="password" autocomplete="new-password" minlength="6" required>
       </div>
       <p id="modalRecuperarPassError" class="auth-form-error" role="alert"></p>
       <div class="auth-modal-acciones">
-        <button type="button" class="btn-primary" id="btnModalGuardarNuevaPass">Guardar contraseña</button>
+        <button type="button" class="btn-primary rounded-2xl" id="btnModalGuardarNuevaPass">Guardar contraseña</button>
         <button type="button" class="auth-link-btn" id="btnModalCancelarNuevaPass">Cancelar</button>
       </div>
     </div>
     <div class="auth-modal-acciones" id="modalRecuperarAccionesInicial">
-      <button type="button" class="btn-primary" id="btnComprobarCorreoRecuperar">Comprobar correo</button>
+      <button type="button" class="btn-primary rounded-2xl" id="btnComprobarCorreoRecuperar">Comprobar correo</button>
       <button type="button" class="modal-no-entregado-close" id="btnCerrarModalRecuperar">Cerrar</button>
     </div>
   </div>
 </div>
 
-<div id="mainApp" class="container mx-auto max-w-7xl" data-app-main style="display:none;">
-  <header class="app-header">
-    <div class="app-header-inner">
+<div id="mainApp" class="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-10" data-app-main style="display:none;">
+  <header class="app-header bento-card mb-6 flex items-center justify-between gap-4 p-5 sm:p-6">
+    <div class="app-header-inner w-full">
       <div class="app-header-textos">
-        <h1 class="app-header-title">Gestión de Pedidos Delivery</h1>
+        <p class="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-violet-600 dark:text-violet-400">Delivery</p>
+        <h1 class="app-header-title m-0 text-left text-xl font-semibold tracking-tight sm:text-2xl">Gestión de pedidos</h1>
         <p id="appHeaderUsuario" class="app-header-usuario" aria-live="polite"></p>
       </div>
-      <div class="app-header-menu-wrap">
-        <button type="button" id="btnMenuUsuario" class="btn-menu-hamburger" aria-expanded="false" aria-controls="menuUsuarioPanel" aria-label="Abrir menú" onclick="toggleMenuUsuario(event)">
-          <span data-lucide="menu"></span>
+      <div class="flex items-center gap-2">
+        <button type="button" id="btnTemaOscuro" class="btn-menu-hamburger" aria-pressed="false" aria-label="Cambiar a modo oscuro" onclick="alternarTemaApp()">
+          <span data-lucide="moon"></span>
         </button>
-        <div id="menuUsuarioPanel" class="menu-usuario-panel" style="display:none;" role="menu" aria-label="Menú de la cuenta">
-          <button type="button" class="menu-usuario-accion" role="menuitem" onclick="menuIrAlInicio()"><span data-lucide="house"></span> Inicio</button>
-          <button type="button" id="btnMenuUsuarios" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirPaginaUsuariosRoles()"><span data-lucide="users"></span> Usuarios y roles</button>
-          <button type="button" id="btnMenuHistorialEntregas" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirPaginaHistorialEntregas()"><span data-lucide="calendar-days"></span> Historial de entregas</button>
-          <button type="button" id="btnMediosPagoMenu" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirConfigNotificacionDesdeMenu()"><span data-lucide="sliders"></span> Medios de pago (notificación al cliente)</button>
-          <button type="button" class="menu-usuario-accion menu-usuario-accion--danger" role="menuitem" onclick="cerrarSesionApp()"><span data-lucide="log-out"></span> Cerrar sesión</button>
+        <div class="app-header-menu-wrap">
+          <button type="button" id="btnMenuUsuario" class="btn-menu-hamburger" aria-expanded="false" aria-controls="menuUsuarioPanel" aria-label="Abrir menú" onclick="toggleMenuUsuario(event)">
+            <span data-lucide="menu"></span>
+          </button>
+          <div id="menuUsuarioPanel" class="menu-usuario-panel" style="display:none;" role="menu" aria-label="Menú de la cuenta">
+            <button type="button" class="menu-usuario-accion" role="menuitem" onclick="menuIrAlInicio()"><span data-lucide="house"></span> Inicio</button>
+            <button type="button" id="btnMenuUsuarios" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirPaginaUsuariosRoles()"><span data-lucide="users"></span> Usuarios y roles</button>
+            <button type="button" id="btnMenuHistorialEntregas" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirPaginaHistorialEntregas()"><span data-lucide="calendar-days"></span> Historial de entregas</button>
+            <button type="button" id="btnMediosPagoMenu" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirConfigNotificacionDesdeMenu()"><span data-lucide="sliders"></span> Medios de pago (notificación al cliente)</button>
+            <button type="button" class="menu-usuario-accion menu-usuario-accion--danger" role="menuitem" onclick="cerrarSesionApp()"><span data-lucide="log-out"></span> Cerrar sesión</button>
+          </div>
         </div>
       </div>
     </div>
   </header>
 
   <div id="modalConfigNotificacion" class="modal-no-entregado-backdrop">
-    <div class="modal-no-entregado-card configuracion-notificacion-panel">
+    <div class="modal-no-entregado-card configuracion-notificacion-panel bento-card">
       <h3>Medios de pago en la notificación al cliente</h3>
       <p class="config-notificacion-ayuda">Estos datos se incluyen en el mensaje de WhatsApp cuando notificas al cliente (Nequi, Daviplata, Bre-B). Solo aparecen en el mensaje los medios que marques.</p>
       <p id="configNotificacionError" class="auth-form-error config-notificacion-error" role="alert"></p>
@@ -194,11 +208,11 @@
         </div>
         <div id="cfgNumeroNequiWrap">
           <label for="cfgNumeroNequi">Número Nequi</label>
-          <input type="text" id="cfgNumeroNequi" inputmode="numeric" placeholder="Ej: 3001234567" autocomplete="off">
+          <input type="text" id="cfgNumeroNequi" class="ui-input" inputmode="numeric" placeholder="Ej: 3001234567" autocomplete="off">
         </div>
         <div id="cfgNumeroDaviplataWrap">
           <label for="cfgNumeroDaviplata">Número Daviplata</label>
-          <input type="text" id="cfgNumeroDaviplata" inputmode="numeric" placeholder="Ej: 3001234567" autocomplete="off">
+          <input type="text" id="cfgNumeroDaviplata" class="ui-input" inputmode="numeric" placeholder="Ej: 3001234567" autocomplete="off">
         </div>
         <label class="config-check">
           <input type="checkbox" id="cfgTieneLlave">
@@ -206,111 +220,117 @@
         </label>
         <div id="cfgLlaveWrap">
           <label for="cfgLlavePago">Llave Bre-B</label>
-          <input type="text" id="cfgLlavePago" placeholder="Ej: @micuenta" autocomplete="off">
+          <input type="text" id="cfgLlavePago" class="ui-input" placeholder="Ej: @micuenta" autocomplete="off">
         </div>
         </div>
-        <button class="btn-primary" type="button" onclick="void guardarConfigNotificacionDesdeUI()">Guardar configuración</button>
+        <button class="btn-primary rounded-2xl" type="button" onclick="void guardarConfigNotificacionDesdeUI()">Guardar configuración</button>
       </div>
       <button class="modal-no-entregado-close" type="button" onclick="cerrarConfigNotificacion()">Cerrar</button>
     </div>
   </div>
 
-  <div id="appVistaPrincipal" class="app-vista-principal">
-  <div id="bannerAvisosTelefono" class="banner-avisos-telefono" style="display:none;" aria-live="polite"></div>
-  <div id="sectionPegarPedido" class="section section-pegar-pedidos" style="display:none;" aria-hidden="true">
-    <h2><span data-lucide="message-circle" data-lucide-class="icon-ui icon-ui--whatsapp"></span> Pegar formatos de pedido (WhatsApp)</h2>
-    <p class="section-pegar-ayuda">Pega aquí el texto tal como sale del chat (con hora, nombre de la tienda y líneas sueltas). Puedes pegar <strong>un solo pedido</strong> o <strong>varios</strong> seguidos (cada uno con &ldquo;¿Todo en orden?&rdquo;). El enlace de Google Maps puede ir en una línea aparte; se detecta igual.</p>
-    <textarea id="textoPedido" class="textarea-pedidos-chat" placeholder="Ejemplo: líneas con [hora] Tienda: …, enlace maps.google.com en otra línea, bloque &quot;Para agilizar tu pedido…&quot; con 📍 🙋 📲 💰 y producto. Varios pedidos: uno tras otro."></textarea>
-    <br><br>
-    <button type="button" id="btnProcesarPedido" class="btn-primary" onclick="procesarPedido()">Procesar pedido(s)</button>
-    <div id="mapLinksPendientesPanel" class="map-links-pendientes" style="display:none;" aria-live="polite">
+  <div id="appVistaPrincipal" class="app-vista-principal grid grid-cols-1 gap-6 xl:grid-cols-12">
+  <div id="bannerAvisosTelefono" class="banner-avisos-telefono xl:col-span-12" style="display:none;" aria-live="polite"></div>
+
+  <div id="sectionPegarPedido" class="section section-pegar-pedidos bento-card xl:col-span-7" style="display:none;" aria-hidden="true">
+    <h2 class="bento-title"><span data-lucide="message-circle" data-lucide-class="icon-ui icon-ui--whatsapp"></span> Pegar pedidos de WhatsApp</h2>
+    <p class="section-pegar-ayuda bento-help">Pega el texto tal como sale del chat. Puedes pegar <strong>un pedido</strong> o <strong>varios</strong> seguidos. El enlace de Google Maps se detecta igual si va en otra línea.</p>
+    <textarea id="textoPedido" class="textarea-pedidos-chat ui-input min-h-40" placeholder="Pega aquí el formato del chat…"></textarea>
+    <div class="mt-5">
+      <button type="button" id="btnProcesarPedido" class="btn-primary rounded-2xl" onclick="procesarPedido()">Procesar pedido(s)</button>
+    </div>
+    <div id="mapLinksPendientesPanel" class="map-links-pendientes mt-5 rounded-2xl" style="display:none;" aria-live="polite">
       <h3 class="map-links-pendientes-titulo">Enlaces de Maps por corregir</h3>
       <p class="map-links-pendientes-ayuda">Algunos pedidos tienen un enlace corto o no se pudieron obtener coordenadas. Ábrelo, copia el enlace completo y pégalo aquí para aplicar.</p>
       <div id="mapLinksPendientesLista"></div>
     </div>
   </div>
 
-  <div class="section">
-    <div class="actions-bar">
-      <h2 style="margin: 0; border: none; padding: 0;">Lista de Pedidos</h2>
-      <button type="button" id="btnEliminarTodos" class="btn-danger" onclick="eliminarTodos()"><span data-lucide="trash"></span> Eliminar Todos</button>
-    </div>
-    <div id="bulkAssignBar" class="bulk-assign-bar" style="display:none;">
+  <div class="section bento-card xl:col-span-5">
+    <h2 class="bento-title">Resumen del día</h2>
+    <div id="bulkAssignBar" class="bulk-assign-bar rounded-2xl" style="display:none;">
       <span class="bulk-assign-label"><span data-lucide="users"></span> Asignar todos los pedidos <strong>activos</strong> (pendientes y en ruta) a</span>
-      <select id="bulkAssignSelect" class="bulk-assign-select" aria-label="Mensajero para asignación masiva"></select>
-      <button type="button" id="bulkAssignBtn" class="btn-primary">Aplicar</button>
+      <select id="bulkAssignSelect" class="bulk-assign-select ui-input" aria-label="Mensajero para asignación masiva"></select>
+      <button type="button" id="bulkAssignBtn" class="btn-primary rounded-2xl">Aplicar</button>
     </div>
-    <div class="totales-resumen" id="totalesResumen" style="display: none;">
-      <div class="total-item total-recogido-dia">
+    <div class="totales-resumen grid grid-cols-1 gap-3 sm:grid-cols-2" id="totalesResumen" style="display: none;">
+      <div class="total-item total-recogido-dia rounded-2xl">
         <span class="total-icon icon-recogido-dia"><span data-lucide="banknote"></span></span>
-        Total recogido en el día: $<span id="totalRecogidoDia">0</span>
+        <span>Total recogido<br><strong>$<span id="totalRecogidoDia">0</span></strong></span>
       </div>
-      <div class="total-item total-pago-domiciliario">
+      <div class="total-item total-pago-domiciliario rounded-2xl">
         <span class="total-icon icon-pago-domiciliario"><span data-lucide="bike"></span></span>
-        Pago a domiciliario: $<span id="totalPagoDomiciliario">0</span>
+        <span>Pago a domiciliario<br><strong>$<span id="totalPagoDomiciliario">0</span></strong></span>
       </div>
-      <div class="total-item total-entregar-tienda">
+      <div class="total-item total-entregar-tienda rounded-2xl">
         <span class="total-icon icon-entregar-tienda"><span data-lucide="store"></span></span>
-        A entregar a tienda: $<span id="totalEntregarTienda">0</span>
+        <span>A entregar a tienda<br><strong>$<span id="totalEntregarTienda">0</span></strong></span>
       </div>
-      <div class="total-item total-total-dia">
+      <div class="total-item total-total-dia rounded-2xl">
         <span class="total-icon icon-total-dia"><span data-lucide="banknote"></span></span>
-        Pendiente por recoger: $<span id="totalDelDia">0</span>
+        <span>Pendiente por recoger<br><strong>$<span id="totalDelDia">0</span></strong></span>
       </div>
-      <div class="total-item total-nequi">
+      <div class="total-item total-nequi rounded-2xl">
         <span class="total-icon icon-nequi"><span data-lucide="smartphone"></span></span>
         Recogido por Nequi: $<span id="totalPagadoNequi">0</span>
       </div>
-      <div class="total-item total-daviplata">
+      <div class="total-item total-daviplata rounded-2xl">
         <span class="total-icon icon-daviplata"><span data-lucide="wallet"></span></span>
         Recogido por Daviplata: $<span id="totalPagadoDaviplata">0</span>
       </div>
-      <div class="total-item total-efectivo">
+      <div class="total-item total-efectivo rounded-2xl">
         <span class="total-icon icon-efectivo"><span data-lucide="banknote"></span></span>
         Recogido en efectivo: $<span id="totalPagadoEfectivo">0</span>
       </div>
     </div>
-    <div class="pedidos-tabs" id="pedidosTabs" role="tablist" aria-label="Estado de pedidos">
-      <button type="button" class="pedidos-tab active" role="tab" aria-selected="true" data-vista-pedidos="pendientes" onclick="cambiarVistaPedidos('pendientes')"><span data-lucide="clock"></span> Pendientes</button>
-      <button type="button" class="pedidos-tab" role="tab" aria-selected="false" data-vista-pedidos="enCurso" hidden onclick="cambiarVistaPedidos('enCurso')"><span data-lucide="truck"></span> En ruta</button>
-      <button type="button" class="pedidos-tab" role="tab" aria-selected="false" data-vista-pedidos="entregados" hidden onclick="cambiarVistaPedidos('entregados')"><span data-lucide="circle-check"></span> Finalizados</button>
-      <button type="button" class="pedidos-tab" role="tab" aria-selected="false" data-vista-pedidos="cancelados" hidden onclick="cambiarVistaPedidos('cancelados')"><span data-lucide="ban"></span> Cancelados</button>
+  </div>
+
+  <div class="section bento-card xl:col-span-7">
+    <div class="actions-bar mb-5">
+      <h2 class="bento-title m-0">Lista de pedidos</h2>
+      <button type="button" id="btnEliminarTodos" class="btn-danger rounded-2xl" onclick="eliminarTodos()"><span data-lucide="trash"></span> Eliminar todos</button>
+    </div>
+    <div class="pedidos-tabs mb-5 flex flex-wrap gap-2" id="pedidosTabs" role="tablist" aria-label="Estado de pedidos">
+      <button type="button" class="pedidos-tab active rounded-2xl" role="tab" aria-selected="true" data-vista-pedidos="pendientes" onclick="cambiarVistaPedidos('pendientes')"><span data-lucide="clock"></span> Pendientes</button>
+      <button type="button" class="pedidos-tab rounded-2xl" role="tab" aria-selected="false" data-vista-pedidos="enCurso" hidden onclick="cambiarVistaPedidos('enCurso')"><span data-lucide="truck"></span> En ruta</button>
+      <button type="button" class="pedidos-tab rounded-2xl" role="tab" aria-selected="false" data-vista-pedidos="entregados" hidden onclick="cambiarVistaPedidos('entregados')"><span data-lucide="circle-check"></span> Finalizados</button>
+      <button type="button" class="pedidos-tab rounded-2xl" role="tab" aria-selected="false" data-vista-pedidos="cancelados" hidden onclick="cambiarVistaPedidos('cancelados')"><span data-lucide="ban"></span> Cancelados</button>
     </div>
     <div id="listaPedidos">
       <div class="empty-state" id="emptyState">
         <p>No hay pedidos aún</p>
-        <p style="font-size: 14px;">Pega un pedido desde WhatsApp en el cuadro de arriba.</p>
+        <p>Pega un pedido desde WhatsApp en el cuadro de al lado.</p>
       </div>
     </div>
   </div>
 
-  <div id="sectionMapaEntregas" class="section section-mapa-entregas">
-    <h2>Mapa de Entregas</h2>
+  <div id="sectionMapaEntregas" class="section section-mapa-entregas bento-card xl:col-span-5">
+    <h2 class="bento-title">Mapa de entregas</h2>
     <div class="mapa-con-orden">
-      <div id="mapa" class="mapa-container" role="img" aria-label="Mapa de entregas" style="width:100%;height:500px;min-height:320px;"></div>
-      <div class="orden-entrega-panel">
-        <h3>Orden de entrega</h3>
-        <p class="orden-ayuda">Pulsa y arrastra una fila (ratón o dedo) y suéltala donde quieras en esta lista. Las flechas ▲ ▼ siguen disponibles. El orden se guarda en este dispositivo.</p>
+      <div id="mapa" class="mapa-container overflow-hidden rounded-2xl" role="img" aria-label="Mapa de entregas" style="width:100%;height:420px;min-height:280px;"></div>
+      <div class="orden-entrega-panel mt-5">
+        <h3 class="m-0 mb-2 text-base font-semibold">Orden de entrega</h3>
+        <p class="orden-ayuda bento-help">Arrastra una fila y suéltala donde quieras. Las flechas ▲ ▼ siguen disponibles.</p>
         <div id="listaOrdenEntrega"></div>
       </div>
     </div>
   </div>
 
   <nav class="fab-navegacion-app" aria-label="Accesos rápidos de página">
-    <button type="button" id="fabNavegacionArriba" class="fab-app-btn fab-app-btn--hidden" onclick="scrollToTopApp()" title="Ir arriba" aria-label="Ir al inicio de la página" aria-hidden="true">
+    <button type="button" id="fabNavegacionArriba" class="fab-app-btn fab-app-btn--hidden rounded-2xl" onclick="scrollToTopApp()" title="Ir arriba" aria-label="Ir al inicio de la página" aria-hidden="true">
       <span data-lucide="arrow-up"></span>
     </button>
-    <button type="button" id="fabNavegacionMapa" class="fab-app-btn fab-app-btn--mapa" onclick="scrollToMapaApp()" title="Ir al mapa" aria-label="Ir al mapa de entregas">
+    <button type="button" id="fabNavegacionMapa" class="fab-app-btn fab-app-btn--mapa rounded-2xl" onclick="scrollToMapaApp()" title="Ir al mapa" aria-label="Ir al mapa de entregas">
       <span data-lucide="arrow-down"></span>
     </button>
   </nav>
   </div>
 
-  <section id="pageUsuariosRoles" class="page-usuarios-roles" style="display:none;" aria-hidden="true">
-    <h2 class="page-usuarios-roles-titulo"><span data-lucide="users"></span> Usuarios y roles</h2>
-    <p class="modal-usuarios-ayuda page-usuarios-roles-intro">Crea mensajeros u otros administradores y cambia roles cuando lo necesites. En mensajeros puedes permitir o no que confirmen y modifiquen el valor del pedido.</p>
+  <section id="pageUsuariosRoles" class="page-usuarios-roles bento-card mt-6" style="display:none;" aria-hidden="true">
+    <h2 class="page-usuarios-roles-titulo bento-title"><span data-lucide="users"></span> Usuarios y roles</h2>
+    <p class="modal-usuarios-ayuda page-usuarios-roles-intro bento-help">Crea mensajeros u otros administradores y cambia roles cuando lo necesites. En mensajeros puedes permitir o no que confirmen y modifiquen el valor del pedido.</p>
 
-    <section id="sectionMediosPagoTienda" class="medios-pago-tienda-admin">
+    <section id="sectionMediosPagoTienda" class="medios-pago-tienda-admin rounded-2xl">
       <h3 class="page-usuarios-asignaciones-titulo"><span data-lucide="store"></span> Medios de pago de la tienda</h3>
       <p class="config-notificacion-ayuda">Los mensajeros que activen &ldquo;Utilizar medios de pago de la tienda&rdquo; usarán estos datos en la notificación al cliente.</p>
       <p id="configTiendaError" class="auth-form-error config-notificacion-error" role="alert"></p>
@@ -327,15 +347,15 @@
         </div>
         <div id="cfgTiendaNumeroNequiWrap">
           <label for="cfgTiendaNumeroNequi">Número Nequi</label>
-          <input type="text" id="cfgTiendaNumeroNequi" inputmode="numeric" placeholder="Ej: 3001234567" autocomplete="off">
+          <input type="text" id="cfgTiendaNumeroNequi" class="ui-input" inputmode="numeric" placeholder="Ej: 3001234567" autocomplete="off">
         </div>
         <div id="cfgTiendaNumeroDaviplataWrap">
           <label for="cfgTiendaNumeroDaviplata">Número Daviplata</label>
-          <input type="text" id="cfgTiendaNumeroDaviplata" inputmode="numeric" placeholder="Ej: 3001234567" autocomplete="off">
+          <input type="text" id="cfgTiendaNumeroDaviplata" class="ui-input" inputmode="numeric" placeholder="Ej: 3001234567" autocomplete="off">
         </div>
         <div id="cfgTiendaNombreTitularWrap">
           <label for="cfgTiendaNombreTitular">Nombre que aparece en Nequi / Daviplata</label>
-          <input type="text" id="cfgTiendaNombreTitular" placeholder="Ej: Valero Store" autocomplete="off">
+          <input type="text" id="cfgTiendaNombreTitular" class="ui-input" placeholder="Ej: Valero Store" autocomplete="off">
         </div>
         <label class="config-check">
           <input type="checkbox" id="cfgTiendaTieneLlave">
@@ -343,9 +363,9 @@
         </label>
         <div id="cfgTiendaLlaveWrap">
           <label for="cfgTiendaLlavePago">Llave Bre-B</label>
-          <input type="text" id="cfgTiendaLlavePago" placeholder="Ej: @micuenta" autocomplete="off">
+          <input type="text" id="cfgTiendaLlavePago" class="ui-input" placeholder="Ej: @micuenta" autocomplete="off">
         </div>
-        <button type="button" class="btn-primary" onclick="void guardarMediosPagoTiendaDesdeUI()">Guardar medios de la tienda</button>
+        <button type="button" class="btn-primary rounded-2xl" onclick="void guardarMediosPagoTiendaDesdeUI()">Guardar medios de la tienda</button>
       </div>
     </section>
 
@@ -353,7 +373,7 @@
 
     <h3 class="page-usuarios-asignaciones-titulo"><span data-lucide="bike"></span> Pedidos asignados por mensajero</h3>
     <div class="page-usuarios-asignaciones-toolbar">
-      <button type="button" class="btn-info" onclick="void actualizarPanelAsignacionesMensajerosDesdeApi()">Actualizar asignaciones</button>
+      <button type="button" class="btn-info rounded-2xl" onclick="void actualizarPanelAsignacionesMensajerosDesdeApi()">Actualizar asignaciones</button>
     </div>
     <div id="usuariosRolesAsignaciones" class="usuarios-roles-asignaciones" aria-live="polite"></div>
     <div id="totalesAdminPorMensajero" class="admin-totales-por-mensajero" style="display: none;" hidden aria-hidden="true"></div>
@@ -361,50 +381,50 @@
     <h3 class="modal-usuarios-subtitulo">Nuevo usuario</h3>
     <div class="modal-usuarios-form modal-usuarios-form--etiquetado page-usuarios-form-nuevo">
       <label class="modal-usuarios-mini-label" for="nuevoUsuarioNombre">Nombre en la app</label>
-      <input type="text" id="nuevoUsuarioNombre" class="modal-usuarios-input-compact" autocomplete="nickname">
+      <input type="text" id="nuevoUsuarioNombre" class="modal-usuarios-input-compact ui-input" autocomplete="nickname">
       <label class="modal-usuarios-mini-label" for="nuevoUsuarioEmail">Correo</label>
-      <input type="email" id="nuevoUsuarioEmail" autocomplete="email">
+      <input type="email" id="nuevoUsuarioEmail" class="ui-input" autocomplete="email">
       <label class="modal-usuarios-mini-label" for="nuevoUsuarioPass">Contraseña (mín. 6)</label>
-      <input type="password" id="nuevoUsuarioPass" class="modal-usuarios-input-compact" autocomplete="new-password">
+      <input type="password" id="nuevoUsuarioPass" class="modal-usuarios-input-compact ui-input" autocomplete="new-password">
       <label class="modal-usuarios-mini-label" for="nuevoUsuarioRol">Rol</label>
-      <select id="nuevoUsuarioRol">
+      <select id="nuevoUsuarioRol" class="ui-input">
         <option value="mensajero">Mensajero</option>
         <option value="admin">Administrador</option>
       </select>
-      <button type="button" class="btn-primary" id="btnCrearUsuarioAdmin" onclick="void crearUsuarioDesdeModal()">Crear</button>
+      <button type="button" class="btn-primary rounded-2xl" id="btnCrearUsuarioAdmin" onclick="void crearUsuarioDesdeModal()">Crear</button>
     </div>
   </section>
 
-  <section id="pageHistorialEntregas" class="page-historial-entregas" style="display:none;" aria-hidden="true">
+  <section id="pageHistorialEntregas" class="page-historial-entregas bento-card mt-6" style="display:none;" aria-hidden="true">
     <div class="page-historial-entregas-head">
-      <button type="button" class="btn-info" onclick="cerrarPaginaHistorialEntregas()"><span data-lucide="arrow-left"></span> Volver</button>
-      <h2 class="page-historial-entregas-titulo"><span data-lucide="calendar-days"></span> Historial de entregas</h2>
+      <button type="button" class="btn-info rounded-2xl" onclick="cerrarPaginaHistorialEntregas()"><span data-lucide="arrow-left"></span> Volver</button>
+      <h2 class="page-historial-entregas-titulo bento-title"><span data-lucide="calendar-days"></span> Historial de entregas</h2>
     </div>
-    <p id="historialEntregasIntro" class="page-historial-entregas-intro">Resumen por día, montos recogidos y qué pedidos entregó cada repartidor.</p>
-    <div class="historial-retencion-box">
+    <p id="historialEntregasIntro" class="page-historial-entregas-intro bento-help">Resumen por día, montos recogidos y qué pedidos entregó cada repartidor.</p>
+    <div class="historial-retencion-box rounded-2xl">
       <label class="historial-retencion-label" for="historialRetencionDias">Conservar historial durante</label>
       <div class="historial-retencion-row">
-        <input type="number" id="historialRetencionDias" class="historial-retencion-input" min="0" max="3650" step="1" value="30" inputmode="numeric" aria-describedby="historialRetencionHint">
+        <input type="number" id="historialRetencionDias" class="historial-retencion-input ui-input" min="0" max="3650" step="1" value="30" inputmode="numeric" aria-describedby="historialRetencionHint">
         <span class="historial-retencion-unidad">días</span>
-        <button type="button" class="btn-primary" id="btnGuardarRetencionHistorial" onclick="void guardarRetencionHistorialDesdeUI()">Guardar</button>
+        <button type="button" class="btn-primary rounded-2xl" id="btnGuardarRetencionHistorial" onclick="void guardarRetencionHistorialDesdeUI()">Guardar</button>
       </div>
       <p id="historialRetencionHint" class="historial-retencion-hint">Los días más antiguos que el límite se eliminan solos. Usa 0 para no borrar nunca.</p>
     </div>
     <div class="page-historial-entregas-toolbar">
-      <button type="button" class="btn-primary" onclick="void refrescarHistorialEntregasUI()">Actualizar</button>
+      <button type="button" class="btn-primary rounded-2xl" onclick="void refrescarHistorialEntregasUI()">Actualizar</button>
     </div>
     <div id="historialEntregasLista" class="historial-entregas-lista" aria-live="polite"></div>
   </section>
 </div>
 
-<script src="ui/lucide.js?v=20261106ui"></script>
-<script src="app.js?v=20261106ui" defer></script>
+<script src="ui/lucide.js?v=20261106bento"></script>
+<script src="ui/theme.js?v=20261106bento"></script>
+<script src="app.js?v=20261106bento" defer></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    // Limpiar SW/caché viejos que dejaban el parser anterior (productos/valor incorrectos).
     var reiniciar = function () {
-      navigator.serviceWorker.register('./sw.js?v=20261106ui').catch(function (err) {
+      navigator.serviceWorker.register('./sw.js?v=20261106bento').catch(function (err) {
         console.warn('[sw] No se pudo registrar:', err);
       });
     };
