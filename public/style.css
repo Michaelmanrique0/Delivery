@@ -294,11 +294,13 @@ button {
 .btn-icon-only {
   width: 34px;
   height: 34px;
+  min-width: 34px;
+  min-height: 34px;
   padding: 0;
   margin: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
+  line-height: 0;
   background: #dc2626;
 }
 
@@ -306,8 +308,16 @@ button {
   background: #b91c1c;
 }
 
-.btn-icon-only i {
-  margin-right: 0;
+.btn-icon-only i,
+.btn-icon-only .icon-ui,
+.btn-icon-only svg,
+.btn-icon-only [data-lucide] {
+  margin: 0;
+  padding: 0;
+  display: block;
+  vertical-align: 0;
+  width: 18px;
+  height: 18px;
 }
 
 .btn-warning {
