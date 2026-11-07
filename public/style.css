@@ -1871,14 +1871,18 @@ h3 .icon-ui {
   }
 }
 
-/* Botones flotantes: inicio y mapa (debajo de modales 9999, sobre el contenido) */
+/* Botones flotantes: inicio y mapa, centrados abajo */
 .fab-navegacion-app {
   position: fixed;
   z-index: 8000;
-  left: max(12px, env(safe-area-inset-left, 0px));
+  left: 50%;
+  right: auto;
   bottom: max(20px, env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
   gap: 12px;
   pointer-events: none;
 }
@@ -1901,23 +1905,24 @@ h3 .icon-ui {
   font-weight: 400;
   line-height: 1;
   cursor: pointer;
-  color: var(--text-light);
+  color: #fff;
   background: var(--triad-a);
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.28);
   transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
 
-/* FA Solid usa peso 900; si hereda 600 del button global el glifo queda mal centrado o raro */
-.fab-navegacion-app .fab-app-btn i {
+.fab-navegacion-app .fab-app-btn i,
+.fab-navegacion-app .fab-app-btn .icon-ui,
+.fab-navegacion-app .fab-app-btn [data-lucide] {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  height: 100%;
+  width: 22px;
+  height: 22px;
   margin: 0;
   padding: 0;
   font-size: 22px;
-  font-weight: 900;
+  font-weight: 400;
   line-height: 1;
   flex-shrink: 0;
 }
