@@ -3377,17 +3377,17 @@ function renderPedidos() {
     }
     if (elPagadoEfectivo) elPagadoEfectivo.textContent = totales.totalPagadoEfectivo.toLocaleString('es-CO');
     if (itemNequi)
-      itemNequi.style.display = totales.totalPagadoNequi !== 0 ? 'inline-flex' : 'none';
+      itemNequi.style.display = totales.totalPagadoNequi !== 0 ? 'flex' : 'none';
     if (itemDaviplata)
-      itemDaviplata.style.display = totales.totalPagadoDaviplata !== 0 ? 'inline-flex' : 'none';
-    if (itemEfectivo) itemEfectivo.style.display = totales.totalPagadoEfectivo !== 0 ? 'inline-flex' : 'none';
+      itemDaviplata.style.display = totales.totalPagadoDaviplata !== 0 ? 'flex' : 'none';
+    if (itemEfectivo) itemEfectivo.style.display = totales.totalPagadoEfectivo !== 0 ? 'flex' : 'none';
     if (itemPagoDomiciliario)
-      itemPagoDomiciliario.style.display = totales.pagoDomiciliario > 0 ? 'inline-flex' : 'none';
+      itemPagoDomiciliario.style.display = totales.pagoDomiciliario > 0 ? 'flex' : 'none';
     if (itemEntregarTienda)
       itemEntregarTienda.style.display =
-        totales.recogidoDelDia > 0 || totales.pagoDomiciliario > 0 ? 'inline-flex' : 'none';
+        totales.recogidoDelDia > 0 || totales.pagoDomiciliario > 0 ? 'flex' : 'none';
     if (itemTotalDelDia)
-      itemTotalDelDia.style.display = totales.totalDelDia > 0 ? 'inline-flex' : 'none';
+      itemTotalDelDia.style.display = totales.totalDelDia > 0 ? 'flex' : 'none';
     elResumen.style.display = totales.hayDatos ? 'grid' : 'none';
   }
 

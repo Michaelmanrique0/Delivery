@@ -10,8 +10,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="tailwind.css?v=20261106bento">
-<link rel="stylesheet" href="style.css?v=20261106fabicon">
+<link rel="stylesheet" href="tailwind.css?v=20261106mobfix">
+<link rel="stylesheet" href="style.css?v=20261106mobfix">
 <script>
 (function () {
   try {
@@ -253,7 +253,7 @@
       <select id="bulkAssignSelect" class="bulk-assign-select ui-input" aria-label="Mensajero para asignación masiva"></select>
       <button type="button" id="bulkAssignBtn" class="btn-primary rounded-2xl">Aplicar</button>
     </div>
-    <div class="totales-resumen grid grid-cols-1 gap-3 sm:grid-cols-2" id="totalesResumen" style="display: none;">
+    <div class="totales-resumen" id="totalesResumen" style="display: none;">
       <div class="total-item total-recogido-dia rounded-2xl">
         <span class="total-icon icon-recogido-dia"><span data-lucide="banknote"></span></span>
         <span>Total recogido<br><strong>$<span id="totalRecogidoDia">0</span></strong></span>
@@ -415,7 +415,7 @@
 
 <script src="ui/lucide.js?v=20261106bento"></script>
 <script src="ui/theme.js?v=20261106bento"></script>
-<script src="app.js?v=20261106bento" defer></script>
+<script src="app.js?v=20261106mobfix" defer></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
