@@ -194,6 +194,8 @@
       <div id="bloqueNuevaTiendaAdmin" class="bloque-nueva-tienda" style="display:none;">
         <label class="modal-usuarios-mini-label" for="inputNuevaTiendaNombre">Nueva tienda</label>
         <input type="text" id="inputNuevaTiendaNombre" class="ui-input" maxlength="80" placeholder="Nombre de la tienda" autocomplete="off">
+        <label class="modal-usuarios-mini-label" for="inputNuevaTiendaTelefono">Número de confirmación de entrega</label>
+        <input type="text" id="inputNuevaTiendaTelefono" class="ui-input" inputmode="numeric" maxlength="15" placeholder="WhatsApp de la tienda, 10 dígitos" autocomplete="off">
         <button type="button" class="btn-info rounded-2xl" onclick="void crearTiendaDesdeUI()">Añadir tienda</button>
       </div>
       <div class="modal-no-entregado-actions">
@@ -345,6 +347,17 @@
     <h2 class="page-usuarios-roles-titulo bento-title"><span data-lucide="users"></span> Usuarios y roles</h2>
     <p class="modal-usuarios-ayuda page-usuarios-roles-intro bento-help">Crea mensajeros u otros administradores y cambia roles cuando lo necesites. En mensajeros puedes permitir o no que confirmen y modifiquen el valor del pedido.</p>
 
+    <section id="sectionConfirmacionEntregaTienda" class="medios-pago-tienda-admin rounded-2xl">
+      <h3 class="page-usuarios-asignaciones-titulo"><span data-lucide="message-circle"></span> Confirmación de entrega</h3>
+      <p id="cfgTiendaTelefonoConfirmacionHint" class="config-notificacion-ayuda">Chat de WhatsApp donde se envía el mensaje y la foto al confirmar una entrega de esta tienda.</p>
+      <p id="configTiendaConfirmacionError" class="auth-form-error config-notificacion-error" role="alert"></p>
+      <div class="medios-pago-tienda-form configuracion-notificacion-body">
+        <label for="cfgTiendaTelefonoConfirmacion">Número de confirmación (WhatsApp)</label>
+        <input type="text" id="cfgTiendaTelefonoConfirmacion" class="ui-input" inputmode="numeric" maxlength="15" placeholder="Ej: 3213153165" autocomplete="off">
+        <button type="button" class="btn-primary rounded-2xl" onclick="void guardarTelefonoConfirmacionTiendaDesdeUI()">Guardar número de esta tienda</button>
+      </div>
+    </section>
+
     <section id="sectionMediosPagoTienda" class="medios-pago-tienda-admin rounded-2xl">
       <h3 class="page-usuarios-asignaciones-titulo"><span data-lucide="store"></span> Medios de pago de la tienda</h3>
       <p class="config-notificacion-ayuda">Los mensajeros que activen &ldquo;Utilizar medios de pago de la tienda&rdquo; usarán estos datos en la notificación al cliente.</p>
@@ -434,7 +447,7 @@
 
 <script src="ui/lucide.js?v=20261106bento"></script>
 <script src="ui/theme.js?v=20261106bento"></script>
-<script src="app.js?v=20261107xbtn" defer></script>
+<script src="app.js?v=20261107conf" defer></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {

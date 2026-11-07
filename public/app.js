@@ -156,6 +156,52 @@ function nombreTiendaActiva() {
   return (t && t.nombre) || 'Tienda principal';
 }
 
+function tiendaPorId(tiendaId) {
+  const tid = String(tiendaId || tiendaActivaId || TIENDA_DEFAULT_ID);
+  return catalogoTiendas.find((x) => String(x.id) === tid) || null;
+}
+
+function digitosTelefonoConfirmacionTienda(tiendaId) {
+  const t = tiendaPorId(tiendaId);
+  const n = String((t && t.telefonoConfirmacion) || '').replace(/\D/g, '');
+  return n || String(TELEFONO_SOPORTE || '').replace(/\D/g, '');
+}
+
+function cargarTelefonoConfirmacionTiendaEnUI() {
+  const input = document.getElementById('cfgTiendaTelefonoConfirmacion');
+  const hint = document.getElementById('cfgTiendaTelefonoConfirmacionHint');
+  if (input) input.value = digitosTelefonoConfirmacionTienda(tiendaActivaId);
+  if (hint) {
+    hint.textContent = `Chat de WhatsApp para confirmar entregas de ${nombreTiendaActiva()}.`;
+  }
+}
+
+async function guardarTelefonoConfirmacionTiendaDesdeUI() {
+  if (!esSesionAdmin()) return;
+  const input = document.getElementById('cfgTiendaTelefonoConfirmacion');
+  const err = document.getElementById('configTiendaConfirmacionError');
+  if (err) err.textContent = '';
+  const telefonoConfirmacion = String(input ? input.value : '').replace(/\D/g, '');
+  if (telefonoConfirmacion && (telefonoConfirmacion.length < 10 || telefonoConfirmacion.length > 15)) {
+    if (err) err.textContent = 'El número debe tener entre 10 y 15 dígitos.';
+    return;
+  }
+  try {
+    const data = await apiJson(`/api/tiendas/${encodeURIComponent(tiendaActivaId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        nombre: nombreTiendaActiva(),
+        telefonoConfirmacion,
+      }),
+    });
+    if (Array.isArray(data.tiendas) && data.tiendas.length) catalogoTiendas = data.tiendas;
+    cargarTelefonoConfirmacionTiendaEnUI();
+    mostrarToast(`Número de confirmación guardado para ${nombreTiendaActiva()}.`, 'success');
+  } catch (e) {
+    if (err) err.textContent = String(e.message || e);
+  }
+}
+
 function actualizarTextoCabeceraUsuario() {
   const el = document.getElementById('appHeaderUsuario');
   if (!el || !sesionUsuario) return;
@@ -209,6 +255,7 @@ function abrirModalCambiarTienda() {
 
 async function crearTiendaDesdeUI() {
   const input = document.getElementById('inputNuevaTiendaNombre');
+  const inputTel = document.getElementById('inputNuevaTiendaTelefono');
   const err = document.getElementById('cambiarTiendaError');
   if (err) err.textContent = '';
   const nombre = input ? String(input.value || '').trim() : '';
@@ -216,16 +263,23 @@ async function crearTiendaDesdeUI() {
     if (err) err.textContent = 'Escribe un nombre de tienda (mínimo 2 caracteres).';
     return;
   }
+  const telefonoConfirmacion = String(inputTel ? inputTel.value : '').replace(/\D/g, '');
+  if (telefonoConfirmacion && (telefonoConfirmacion.length < 10 || telefonoConfirmacion.length > 15)) {
+    if (err) err.textContent = 'El número de confirmación debe tener entre 10 y 15 dígitos.';
+    return;
+  }
   try {
     const data = await apiJson('/api/tiendas', {
       method: 'POST',
-      body: JSON.stringify({ nombre }),
+      body: JSON.stringify({ nombre, telefonoConfirmacion }),
     });
     catalogoTiendas = Array.isArray(data.tiendas) ? data.tiendas : catalogoTiendas;
     tiendaActivaId = String(data.tiendaActivaId || data.tienda?.id || tiendaActivaId);
     actualizarTextoCabeceraUsuario();
     if (input) input.value = '';
+    if (inputTel) inputTel.value = '';
     pintarListaTiendasCambio();
+    cargarTelefonoConfirmacionTiendaEnUI();
     renderPedidos();
     actualizarMarcadores();
     mostrarToast(`Tienda creada. Ahora trabajas en ${nombreTiendaActiva()}.`, 'success');
@@ -258,6 +312,8 @@ async function confirmarCambioTienda() {
     if (pageHist && pageHist.style.display === 'block') {
       void refrescarHistorialEntregasUI({ omitirCargaConfig: true });
     }
+    cargarTelefonoConfirmacionTiendaEnUI();
+    cargarMediosPagoTiendaEnUI();
     mostrarToast(`Ahora trabajas en ${nombreTiendaActiva()}.`, 'success');
   } catch (e) {
     if (err) err.textContent = String(e.message || e);
@@ -2194,7 +2250,7 @@ function notificarVendedorTelefonoInvalido(pedidoId) {
     return;
   }
   const mensaje = construirMensajeNotificarVendedorTelefono(pedido);
-  const wa = obtenerSoporteWhatsApp();
+  const wa = obtenerSoporteWhatsApp(pedido);
   void copiarTextoAlPortapapeles(mensaje, 'Mensaje copiado. Pégalo en el chat del vendedor.').then((copiado) => {
     if (copiado) abrirWhatsAppChat(wa);
   });
@@ -4937,8 +4993,10 @@ function whatsappMensaje(numero) {
   window.open(`https://wa.me/${wa}?text=Hola`, "_blank");
 }
 
-function obtenerSoporteWhatsApp() {
-  const limpio = TELEFONO_SOPORTE.replace(/\D/g, '');
+function obtenerSoporteWhatsApp(pedido) {
+  const tid = pedido ? idTiendaPedido(pedido) : (tiendaActivaId || TIENDA_DEFAULT_ID);
+  const limpio = digitosTelefonoConfirmacionTienda(tid);
+  if (!limpio) return '';
   return limpio.startsWith('57') ? limpio : `57${limpio}`;
 }
 
@@ -4947,7 +5005,7 @@ function soporteLlamarWhatsApp() {
 }
 
 function soporteLlamadaNormal() {
-  const limpio = TELEFONO_SOPORTE.replace(/\D/g, '');
+  const limpio = digitosTelefonoConfirmacionTienda(tiendaActivaId);
   window.location.href = `tel:+57${limpio}`;
 }
 
@@ -5187,7 +5245,7 @@ function confirmarMensajeSoporteFaltanProductos() {
   }
   const faltantesTxt = lineasFaltantes.join('\n');
   const mensaje = `Pedido #${idPedido}\nEl cliente indica que le hacen falta productos.\nFaltante(s):\n${faltantesTxt}\nProducto(s) del pedido:\n${productosPedido}`;
-  const wa = obtenerSoporteWhatsApp();
+  const wa = obtenerSoporteWhatsApp(pedido);
   abrirWhatsAppPreferirApp(wa, mensaje);
   cerrarModalMensajeSoporte();
 }
@@ -5210,7 +5268,7 @@ function confirmarMensajeSoportePersonalizado() {
   const idPedido = pedido.id != null ? pedido.id : 'N/A';
   const productosTxt = textoProductosEntregaParaSoporte(pedido);
   const mensaje = `El pedido #${idPedido} ${limpio}\nProductos a entregar:\n${productosTxt}`;
-  const wa = obtenerSoporteWhatsApp();
+  const wa = obtenerSoporteWhatsApp(pedido);
   void copiarTextoAlPortapapeles(mensaje, 'Mensaje copiado. Pégalo en el chat de WhatsApp.').then((copiado) => {
     if (copiado) abrirWhatsAppChat(wa);
     cerrarModalMensajeSoporte();
@@ -5255,7 +5313,7 @@ function enviarMensajeSoporte(tipoProblema) {
   const mensaje = construirMensajeSoporte(pedido, tipoProblema);
   if (!mensaje) return;
 
-  const wa = obtenerSoporteWhatsApp();
+  const wa = obtenerSoporteWhatsApp(pedido);
   abrirWhatsAppPreferirApp(wa, mensaje);
   cerrarModalMensajeSoporte();
 }
@@ -5745,7 +5803,8 @@ function enviarMensajeTiendaFlujoPostCierre() {
     window.setTimeout(() => ofrecerNotificarClienteTrasCierrePedido(), 0);
     return;
   }
-  const numeroAdmin = obtenerSoporteWhatsApp();
+  const pedidoFlujo = pedidos.find((p) => Number(p.id) === Number(flujo.pedidoId));
+  const numeroAdmin = obtenerSoporteWhatsApp(pedidoFlujo);
   const mensaje = String(flujo.mensajeTienda || '');
   flujo.fase = 'esperando_retorno_tienda';
   flujoPostCierreEstabaOculto = false;
@@ -6199,7 +6258,7 @@ async function registrarDevolucionCliente(index, pedidoId, monto, metodo) {
   renderPedidos();
   actualizarMarcadores();
 
-  const numeroAdmin = obtenerSoporteWhatsApp();
+  const numeroAdmin = obtenerSoporteWhatsApp(pedido);
   void copiarTextoAlPortapapeles(
     mensaje,
     'Mensaje copiado. Pégalo en el chat y adjunta la foto de la devolución.'
@@ -6293,7 +6352,7 @@ async function registrarEntregaConPago(index, pedidoId, datosPago) {
 
   // Copiar texto y abrir chat vacío (sin mensaje precargado) para pegar y adjuntar foto.
   if (enviarWhatsAppAdmin) {
-    const numeroAdmin = obtenerSoporteWhatsApp();
+    const numeroAdmin = obtenerSoporteWhatsApp(pedido);
     void copiarTextoAlPortapapeles(
       mensaje,
       'Mensaje copiado. Pégalo en el chat y adjunta la foto de entrega.'
@@ -9408,6 +9467,7 @@ async function mostrarUiPaginaUsuariosRoles() {
     await refrescarListaUsuariosPagina();
     await refrescarMediosPagoTiendaDesdeServidor();
     cargarMediosPagoTiendaEnUI();
+    cargarTelefonoConfirmacionTiendaEnUI();
     scrollToTopApp();
   } finally {
     quitarEstiloPreRestoreUsuariosRoles();

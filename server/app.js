@@ -1106,20 +1106,34 @@ function parseJsonMeta(raw, fallback) {
   }
 }
 
+const TELEFONO_CONFIRMACION_DEFAULT = '3213153165';
+
+function normalizarTelefonoConfirmacion(raw) {
+  return String(raw || '').replace(/\D/g, '').slice(0, 15);
+}
+
+function serializarTiendaCatalogo(t) {
+  const id = String(t && t.id ? t.id : '').trim();
+  const nombre = String(t && t.nombre ? t.nombre : '').trim();
+  let telefonoConfirmacion = normalizarTelefonoConfirmacion(t && t.telefonoConfirmacion);
+  if (!telefonoConfirmacion && id === TIENDA_ID_DEFAULT) {
+    telefonoConfirmacion = TELEFONO_CONFIRMACION_DEFAULT;
+  }
+  return { id, nombre, telefonoConfirmacion };
+}
+
 async function asegurarCatalogoTiendas() {
   const data = parseJsonMeta(await getMeta(TIENDAS_META_KEY), null);
   if (data && Array.isArray(data.tiendas) && data.tiendas.length) {
-    const tiendas = data.tiendas
-      .map((t) => ({
-        id: String(t && t.id ? t.id : '').trim(),
-        nombre: String(t && t.nombre ? t.nombre : '').trim(),
-      }))
-      .filter((t) => t.id && t.nombre);
+    const tiendas = data.tiendas.map(serializarTiendaCatalogo).filter((t) => t.id && t.nombre);
     if (tiendas.length) {
       return { tiendas, defaultId: data.defaultId || tiendas[0].id };
     }
   }
-  const inicial = { tiendas: [TIENDA_DEFAULT], defaultId: TIENDA_DEFAULT.id };
+  const inicial = {
+    tiendas: [serializarTiendaCatalogo(TIENDA_DEFAULT)],
+    defaultId: TIENDA_DEFAULT.id,
+  };
   await setMeta(TIENDAS_META_KEY, JSON.stringify(inicial));
   return inicial;
 }
@@ -1167,14 +1181,16 @@ app.post(
       return;
     }
     const id = `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-    catalogo.tiendas.push({ id, nombre });
+    const telefonoConfirmacion = normalizarTelefonoConfirmacion(req.body?.telefonoConfirmacion);
+    catalogo.tiendas.push({ id, nombre, telefonoConfirmacion });
     await setMeta(TIENDAS_META_KEY, JSON.stringify(catalogo));
     const mapa = await mapaTiendaActivaUsuarios();
     mapa[String(req.user.id)] = id;
     await setMeta(TIENDA_ACTIVA_META_KEY, JSON.stringify(mapa));
+    const tienda = serializarTiendaCatalogo({ id, nombre, telefonoConfirmacion });
     res.status(201).json({
       ok: true,
-      tienda: { id, nombre },
+      tienda,
       tiendas: catalogo.tiendas,
       tiendaActivaId: id,
     });
@@ -1195,6 +1211,39 @@ app.put(
     mapa[String(req.user.id)] = id;
     await setMeta(TIENDA_ACTIVA_META_KEY, JSON.stringify(mapa));
     res.json({ ok: true, tiendaActivaId: id, tiendas: catalogo.tiendas });
+  })
+);
+
+app.put(
+  '/api/tiendas/:id',
+  asyncHandler(authMiddleware),
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const catalogo = await asegurarCatalogoTiendas();
+    const id = String(req.params.id || '').trim();
+    const ix = catalogo.tiendas.findIndex((t) => String(t.id) === id);
+    if (ix < 0) {
+      res.status(400).json({ error: 'Esa tienda no existe.' });
+      return;
+    }
+    const actual = catalogo.tiendas[ix];
+    const nombre = String(req.body?.nombre != null ? req.body.nombre : actual.nombre || '').trim();
+    if (nombre.length < 2) {
+      res.status(400).json({ error: 'Indica un nombre de tienda (mínimo 2 caracteres).' });
+      return;
+    }
+    const telefonoConfirmacion = normalizarTelefonoConfirmacion(req.body?.telefonoConfirmacion);
+    if (telefonoConfirmacion && (telefonoConfirmacion.length < 10 || telefonoConfirmacion.length > 15)) {
+      res.status(400).json({ error: 'El número de confirmación debe tener entre 10 y 15 dígitos.' });
+      return;
+    }
+    catalogo.tiendas[ix] = serializarTiendaCatalogo({
+      ...actual,
+      nombre,
+      telefonoConfirmacion,
+    });
+    await setMeta(TIENDAS_META_KEY, JSON.stringify(catalogo));
+    res.json({ ok: true, tienda: catalogo.tiendas[ix], tiendas: catalogo.tiendas });
   })
 );
 
