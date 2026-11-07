@@ -4,7 +4,8 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node server/index.js"
+    "dev": "node server/index.js",
+    "build:css": "tailwindcss -i ./src/styles/input.css -o ./public/tailwind.css --minify"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
@@ -14,5 +15,9 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.5",
+    "tailwindcss": "^4.3.5"
   }
 }

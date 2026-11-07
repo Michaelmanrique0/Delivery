@@ -10,9 +10,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-<link rel="stylesheet" href="style.css?v=20261031editartel">
+<link rel="stylesheet" href="tailwind.css?v=20261106ui">
+<link rel="stylesheet" href="style.css?v=20261106ui">
 <script>
 (function () {
   try {
@@ -31,23 +30,25 @@
 </script>
 </head>
 
-<body>
+<body class="font-sans antialiased bg-slate-100 text-slate-800">
+
+<a href="#listaPedidos" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[20000] focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-brand focus:shadow">Saltar a la lista de pedidos</a>
 
 <div id="bannerOffline" class="banner-offline" style="display:none;" role="status" aria-live="polite">
   Sin internet — se muestran los pedidos guardados en este dispositivo. Los cambios se sincronizarán al recuperar conexión.
 </div>
 
-<div id="pantallaAuth" class="pantalla-auth" style="display:none;">
+<div id="pantallaAuth" class="pantalla-auth min-h-dvh w-full" style="display:none;">
   <div class="auth-card">
     <div id="authBloquePrincipal">
       <h1 class="auth-titulo">Gestión de pedidos</h1>
       <p id="authErrorGlobal" class="auth-error-global" role="alert"></p>
       <div class="auth-tabs" role="tablist">
-        <button type="button" id="authTabLogin" class="auth-tab active" role="tab">Iniciar sesión</button>
-        <button type="button" id="authTabRegistro" class="auth-tab" role="tab">Registro</button>
+        <button type="button" id="authTabLogin" class="auth-tab active" role="tab" aria-selected="true" aria-controls="formLogin">Iniciar sesión</button>
+        <button type="button" id="authTabRegistro" class="auth-tab" role="tab" aria-selected="false" aria-controls="formRegistro">Registro</button>
       </div>
       <p id="authFormError" class="auth-form-error" role="alert"></p>
-      <form id="formLogin" class="auth-form auth-form--stacked" autocomplete="on">
+      <form id="formLogin" class="auth-form auth-form--stacked" autocomplete="on" aria-label="Iniciar sesión">
         <div class="auth-field-group">
           <label for="loginIdentifier">Correo electrónico</label>
           <input id="loginIdentifier" name="email" type="email" inputmode="email" autocomplete="email" required>
@@ -63,7 +64,7 @@
         <button type="submit" class="btn-primary auth-submit">Entrar</button>
         <button type="button" class="auth-link-btn" id="btnRecuperarClave">Recuperar contraseña</button>
       </form>
-      <form id="formRegistro" class="auth-form auth-form--stacked" style="display:none;" autocomplete="on">
+      <form id="formRegistro" class="auth-form auth-form--stacked" style="display:none;" autocomplete="on" aria-label="Crear cuenta">
         <div class="auth-field-group">
           <label id="regUserLabel" for="regUser">Nombre en la app</label>
           <input id="regUser" type="text" autocomplete="nickname" required minlength="1">
@@ -147,7 +148,7 @@
   </div>
 </div>
 
-<div id="mainApp" class="container" data-app-main style="display:none;">
+<div id="mainApp" class="container mx-auto max-w-7xl" data-app-main style="display:none;">
   <header class="app-header">
     <div class="app-header-inner">
       <div class="app-header-textos">
@@ -155,15 +156,15 @@
         <p id="appHeaderUsuario" class="app-header-usuario" aria-live="polite"></p>
       </div>
       <div class="app-header-menu-wrap">
-        <button type="button" id="btnMenuUsuario" class="btn-menu-hamburger" aria-expanded="false" aria-controls="menuUsuarioPanel" aria-label="Menú" onclick="toggleMenuUsuario(event)">
-          <i class="fa-solid fa-bars" aria-hidden="true"></i>
+        <button type="button" id="btnMenuUsuario" class="btn-menu-hamburger" aria-expanded="false" aria-controls="menuUsuarioPanel" aria-label="Abrir menú" onclick="toggleMenuUsuario(event)">
+          <span data-lucide="menu"></span>
         </button>
-        <div id="menuUsuarioPanel" class="menu-usuario-panel" style="display:none;" role="menu">
-          <button type="button" class="menu-usuario-accion" role="menuitem" onclick="menuIrAlInicio()"><i class="fa-solid fa-house" aria-hidden="true"></i> Inicio</button>
-          <button type="button" id="btnMenuUsuarios" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirPaginaUsuariosRoles()"><i class="fa-solid fa-users"></i> Usuarios y roles</button>
-          <button type="button" id="btnMenuHistorialEntregas" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirPaginaHistorialEntregas()"><i class="fa-solid fa-calendar-days"></i> Historial de entregas</button>
-          <button type="button" id="btnMediosPagoMenu" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirConfigNotificacionDesdeMenu()"><i class="fa-solid fa-sliders"></i> Medios de pago (notificación al cliente)</button>
-          <button type="button" class="menu-usuario-accion menu-usuario-accion--danger" role="menuitem" onclick="cerrarSesionApp()"><i class="fa-solid fa-right-from-bracket"></i> Cerrar sesión</button>
+        <div id="menuUsuarioPanel" class="menu-usuario-panel" style="display:none;" role="menu" aria-label="Menú de la cuenta">
+          <button type="button" class="menu-usuario-accion" role="menuitem" onclick="menuIrAlInicio()"><span data-lucide="house"></span> Inicio</button>
+          <button type="button" id="btnMenuUsuarios" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirPaginaUsuariosRoles()"><span data-lucide="users"></span> Usuarios y roles</button>
+          <button type="button" id="btnMenuHistorialEntregas" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirPaginaHistorialEntregas()"><span data-lucide="calendar-days"></span> Historial de entregas</button>
+          <button type="button" id="btnMediosPagoMenu" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirConfigNotificacionDesdeMenu()"><span data-lucide="sliders"></span> Medios de pago (notificación al cliente)</button>
+          <button type="button" class="menu-usuario-accion menu-usuario-accion--danger" role="menuitem" onclick="cerrarSesionApp()"><span data-lucide="log-out"></span> Cerrar sesión</button>
         </div>
       </div>
     </div>
@@ -217,7 +218,7 @@
   <div id="appVistaPrincipal" class="app-vista-principal">
   <div id="bannerAvisosTelefono" class="banner-avisos-telefono" style="display:none;" aria-live="polite"></div>
   <div id="sectionPegarPedido" class="section section-pegar-pedidos" style="display:none;" aria-hidden="true">
-    <h2><i class="fa-brands fa-whatsapp" style="color:#25D366;"></i> Pegar formatos de pedido (WhatsApp)</h2>
+    <h2><span data-lucide="message-circle" data-lucide-class="icon-ui icon-ui--whatsapp"></span> Pegar formatos de pedido (WhatsApp)</h2>
     <p class="section-pegar-ayuda">Pega aquí el texto tal como sale del chat (con hora, nombre de la tienda y líneas sueltas). Puedes pegar <strong>un solo pedido</strong> o <strong>varios</strong> seguidos (cada uno con &ldquo;¿Todo en orden?&rdquo;). El enlace de Google Maps puede ir en una línea aparte; se detecta igual.</p>
     <textarea id="textoPedido" class="textarea-pedidos-chat" placeholder="Ejemplo: líneas con [hora] Tienda: …, enlace maps.google.com en otra línea, bloque &quot;Para agilizar tu pedido…&quot; con 📍 🙋 📲 💰 y producto. Varios pedidos: uno tras otro."></textarea>
     <br><br>
@@ -232,48 +233,48 @@
   <div class="section">
     <div class="actions-bar">
       <h2 style="margin: 0; border: none; padding: 0;">Lista de Pedidos</h2>
-      <button id="btnEliminarTodos" class="btn-danger" onclick="eliminarTodos()"><i class="fa-solid fa-trash"></i> Eliminar Todos</button>
+      <button type="button" id="btnEliminarTodos" class="btn-danger" onclick="eliminarTodos()"><span data-lucide="trash"></span> Eliminar Todos</button>
     </div>
     <div id="bulkAssignBar" class="bulk-assign-bar" style="display:none;">
-      <span class="bulk-assign-label"><i class="fa-solid fa-user-group"></i> Asignar todos los pedidos <strong>activos</strong> (pendientes y en ruta) a</span>
+      <span class="bulk-assign-label"><span data-lucide="users"></span> Asignar todos los pedidos <strong>activos</strong> (pendientes y en ruta) a</span>
       <select id="bulkAssignSelect" class="bulk-assign-select" aria-label="Mensajero para asignación masiva"></select>
       <button type="button" id="bulkAssignBtn" class="btn-primary">Aplicar</button>
     </div>
     <div class="totales-resumen" id="totalesResumen" style="display: none;">
       <div class="total-item total-recogido-dia">
-        <span class="total-icon icon-recogido-dia"><i class="fa-solid fa-sack-dollar"></i></span>
+        <span class="total-icon icon-recogido-dia"><span data-lucide="banknote"></span></span>
         Total recogido en el día: $<span id="totalRecogidoDia">0</span>
       </div>
       <div class="total-item total-pago-domiciliario">
-        <span class="total-icon icon-pago-domiciliario"><i class="fa-solid fa-motorcycle"></i></span>
+        <span class="total-icon icon-pago-domiciliario"><span data-lucide="bike"></span></span>
         Pago a domiciliario: $<span id="totalPagoDomiciliario">0</span>
       </div>
       <div class="total-item total-entregar-tienda">
-        <span class="total-icon icon-entregar-tienda"><i class="fa-solid fa-store"></i></span>
+        <span class="total-icon icon-entregar-tienda"><span data-lucide="store"></span></span>
         A entregar a tienda: $<span id="totalEntregarTienda">0</span>
       </div>
       <div class="total-item total-total-dia">
-        <span class="total-icon icon-total-dia"><i class="fa-solid fa-sack-dollar"></i></span>
+        <span class="total-icon icon-total-dia"><span data-lucide="banknote"></span></span>
         Pendiente por recoger: $<span id="totalDelDia">0</span>
       </div>
       <div class="total-item total-nequi">
-        <span class="total-icon icon-nequi"><i class="fa-solid fa-mobile-screen-button"></i></span>
+        <span class="total-icon icon-nequi"><span data-lucide="smartphone"></span></span>
         Recogido por Nequi: $<span id="totalPagadoNequi">0</span>
       </div>
       <div class="total-item total-daviplata">
-        <span class="total-icon icon-daviplata"><i class="fa-solid fa-wallet"></i></span>
+        <span class="total-icon icon-daviplata"><span data-lucide="wallet"></span></span>
         Recogido por Daviplata: $<span id="totalPagadoDaviplata">0</span>
       </div>
       <div class="total-item total-efectivo">
-        <span class="total-icon icon-efectivo"><i class="fa-solid fa-money-bill-wave"></i></span>
+        <span class="total-icon icon-efectivo"><span data-lucide="banknote"></span></span>
         Recogido en efectivo: $<span id="totalPagadoEfectivo">0</span>
       </div>
     </div>
-    <div class="pedidos-tabs" id="pedidosTabs">
-      <button type="button" class="pedidos-tab active" data-vista-pedidos="pendientes" onclick="cambiarVistaPedidos('pendientes')"><i class="fa-regular fa-clock"></i> Pendientes</button>
-      <button type="button" class="pedidos-tab" data-vista-pedidos="enCurso" hidden onclick="cambiarVistaPedidos('enCurso')"><i class="fa-solid fa-truck-fast"></i> En ruta</button>
-      <button type="button" class="pedidos-tab" data-vista-pedidos="entregados" hidden onclick="cambiarVistaPedidos('entregados')"><i class="fa-solid fa-circle-check"></i> Finalizados</button>
-      <button type="button" class="pedidos-tab" data-vista-pedidos="cancelados" hidden onclick="cambiarVistaPedidos('cancelados')"><i class="fa-solid fa-ban"></i> Cancelados</button>
+    <div class="pedidos-tabs" id="pedidosTabs" role="tablist" aria-label="Estado de pedidos">
+      <button type="button" class="pedidos-tab active" role="tab" aria-selected="true" data-vista-pedidos="pendientes" onclick="cambiarVistaPedidos('pendientes')"><span data-lucide="clock"></span> Pendientes</button>
+      <button type="button" class="pedidos-tab" role="tab" aria-selected="false" data-vista-pedidos="enCurso" hidden onclick="cambiarVistaPedidos('enCurso')"><span data-lucide="truck"></span> En ruta</button>
+      <button type="button" class="pedidos-tab" role="tab" aria-selected="false" data-vista-pedidos="entregados" hidden onclick="cambiarVistaPedidos('entregados')"><span data-lucide="circle-check"></span> Finalizados</button>
+      <button type="button" class="pedidos-tab" role="tab" aria-selected="false" data-vista-pedidos="cancelados" hidden onclick="cambiarVistaPedidos('cancelados')"><span data-lucide="ban"></span> Cancelados</button>
     </div>
     <div id="listaPedidos">
       <div class="empty-state" id="emptyState">
@@ -286,7 +287,7 @@
   <div id="sectionMapaEntregas" class="section section-mapa-entregas">
     <h2>Mapa de Entregas</h2>
     <div class="mapa-con-orden">
-      <div id="mapa" class="mapa-container"></div>
+      <div id="mapa" class="mapa-container" role="img" aria-label="Mapa de entregas" style="width:100%;height:500px;min-height:320px;"></div>
       <div class="orden-entrega-panel">
         <h3>Orden de entrega</h3>
         <p class="orden-ayuda">Pulsa y arrastra una fila (ratón o dedo) y suéltala donde quieras en esta lista. Las flechas ▲ ▼ siguen disponibles. El orden se guarda en este dispositivo.</p>
@@ -297,20 +298,20 @@
 
   <nav class="fab-navegacion-app" aria-label="Accesos rápidos de página">
     <button type="button" id="fabNavegacionArriba" class="fab-app-btn fab-app-btn--hidden" onclick="scrollToTopApp()" title="Ir arriba" aria-label="Ir al inicio de la página" aria-hidden="true">
-      <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+      <span data-lucide="arrow-up"></span>
     </button>
     <button type="button" id="fabNavegacionMapa" class="fab-app-btn fab-app-btn--mapa" onclick="scrollToMapaApp()" title="Ir al mapa" aria-label="Ir al mapa de entregas">
-      <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+      <span data-lucide="arrow-down"></span>
     </button>
   </nav>
   </div>
 
   <section id="pageUsuariosRoles" class="page-usuarios-roles" style="display:none;" aria-hidden="true">
-    <h2 class="page-usuarios-roles-titulo"><i class="fa-solid fa-users" aria-hidden="true"></i> Usuarios y roles</h2>
+    <h2 class="page-usuarios-roles-titulo"><span data-lucide="users"></span> Usuarios y roles</h2>
     <p class="modal-usuarios-ayuda page-usuarios-roles-intro">Crea mensajeros u otros administradores y cambia roles cuando lo necesites. En mensajeros puedes permitir o no que confirmen y modifiquen el valor del pedido.</p>
 
     <section id="sectionMediosPagoTienda" class="medios-pago-tienda-admin">
-      <h3 class="page-usuarios-asignaciones-titulo"><i class="fa-solid fa-store" aria-hidden="true"></i> Medios de pago de la tienda</h3>
+      <h3 class="page-usuarios-asignaciones-titulo"><span data-lucide="store"></span> Medios de pago de la tienda</h3>
       <p class="config-notificacion-ayuda">Los mensajeros que activen &ldquo;Utilizar medios de pago de la tienda&rdquo; usarán estos datos en la notificación al cliente.</p>
       <p id="configTiendaError" class="auth-form-error config-notificacion-error" role="alert"></p>
       <div class="medios-pago-tienda-form configuracion-notificacion-body">
@@ -350,7 +351,7 @@
 
     <div id="usuariosRolesLista" class="modal-usuarios-lista page-usuarios-lista"></div>
 
-    <h3 class="page-usuarios-asignaciones-titulo"><i class="fa-solid fa-motorcycle" aria-hidden="true"></i> Pedidos asignados por mensajero</h3>
+    <h3 class="page-usuarios-asignaciones-titulo"><span data-lucide="bike"></span> Pedidos asignados por mensajero</h3>
     <div class="page-usuarios-asignaciones-toolbar">
       <button type="button" class="btn-info" onclick="void actualizarPanelAsignacionesMensajerosDesdeApi()">Actualizar asignaciones</button>
     </div>
@@ -376,8 +377,8 @@
 
   <section id="pageHistorialEntregas" class="page-historial-entregas" style="display:none;" aria-hidden="true">
     <div class="page-historial-entregas-head">
-      <button type="button" class="btn-info" onclick="cerrarPaginaHistorialEntregas()"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Volver</button>
-      <h2 class="page-historial-entregas-titulo"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> Historial de entregas</h2>
+      <button type="button" class="btn-info" onclick="cerrarPaginaHistorialEntregas()"><span data-lucide="arrow-left"></span> Volver</button>
+      <h2 class="page-historial-entregas-titulo"><span data-lucide="calendar-days"></span> Historial de entregas</h2>
     </div>
     <p id="historialEntregasIntro" class="page-historial-entregas-intro">Resumen por día, montos recogidos y qué pedidos entregó cada repartidor.</p>
     <div class="historial-retencion-box">
@@ -396,14 +397,14 @@
   </section>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="app.js?v=20261031editartel"></script>
+<script src="ui/lucide.js?v=20261106ui"></script>
+<script src="app.js?v=20261106ui" defer></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
     // Limpiar SW/caché viejos que dejaban el parser anterior (productos/valor incorrectos).
     var reiniciar = function () {
-      navigator.serviceWorker.register('./sw.js?v=20261031editartel').catch(function (err) {
+      navigator.serviceWorker.register('./sw.js?v=20261106ui').catch(function (err) {
         console.warn('[sw] No se pudo registrar:', err);
       });
     };

@@ -1977,7 +1977,9 @@ function actualizarBannerAvisosTelefono() {
         '<div class="banner-aviso-telefono-acciones">' +
         '<button type="button" class="btn-primary" onclick="notificarVendedorTelefonoInvalido(' +
         id +
-        ')"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> Notificar al vendedor</button>' +
+        ')">' +
+        uiIcon('message-circle') +
+        ' Notificar al vendedor</button>' +
         '<button type="button" class="banner-aviso-telefono-cerrar" onclick="descartarAvisoTelefonoPedido(' +
         id +
         ')" aria-label="Cerrar aviso">×</button>' +
@@ -2143,7 +2145,43 @@ function ajustarMapaConReintentos() {
   });
 }
 
-function initMap() {
+let leafletCargaPromise = null;
+
+function cargarLeaflet() {
+  if (typeof L !== 'undefined') return Promise.resolve();
+  if (leafletCargaPromise) return leafletCargaPromise;
+  leafletCargaPromise = new Promise((resolve, reject) => {
+    const cssId = 'leafletCssLazy';
+    if (!document.getElementById(cssId)) {
+      const css = document.createElement('link');
+      css.id = cssId;
+      css.rel = 'stylesheet';
+      css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(css);
+    }
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('No se pudo cargar el mapa'));
+    document.head.appendChild(s);
+  });
+  return leafletCargaPromise;
+}
+
+function uiIcon(nombre) {
+  return typeof iconoUi === 'function' ? iconoUi(nombre) : '';
+}
+
+async function initMap() {
+  if (mapa || !document.getElementById('mapa')) return;
+  try {
+    await cargarLeaflet();
+  } catch (e) {
+    console.error(e);
+    return;
+  }
+  if (typeof L === 'undefined' || mapa) return;
   mapa = L.map('mapa').setView([4.6097, -74.0817], 12);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors',
@@ -2887,10 +2925,10 @@ function guardarPedidos() {
 function actualizarPestañasListaPedidos(pendientes, enCurso, entregados, cancelados) {
   const tabs = document.querySelectorAll('#pedidosTabs [data-vista-pedidos]');
   const cfg = {
-    pendientes: { icon: 'fa-regular fa-clock', texto: 'Pendientes' },
-    enCurso: { icon: 'fa-solid fa-truck-fast', texto: 'En ruta' },
-    entregados: { icon: 'fa-solid fa-circle-check', texto: 'Finalizados' },
-    cancelados: { icon: 'fa-solid fa-ban', texto: 'Cancelados' }
+    pendientes: { icon: 'clock', texto: 'Pendientes' },
+    enCurso: { icon: 'truck', texto: 'En ruta' },
+    entregados: { icon: 'circle-check', texto: 'Finalizados' },
+    cancelados: { icon: 'ban', texto: 'Cancelados' }
   };
   tabs.forEach((btn) => {
     const vista = btn.getAttribute('data-vista-pedidos');
@@ -2901,9 +2939,10 @@ function actualizarPestañasListaPedidos(pendientes, enCurso, entregados, cancel
     else if (vista === 'entregados') n = entregados.length;
     else if (vista === 'cancelados') n = cancelados.length;
     const { icon, texto } = cfg[vista];
-    btn.innerHTML = `<i class="${icon}"></i> ${texto} (${n})`;
+    btn.innerHTML = `${uiIcon(icon)} ${texto} (${n})`;
     btn.hidden = vista !== 'pendientes' && n === 0;
     btn.classList.toggle('active', vista === vistaPedidosActual);
+    btn.setAttribute('aria-selected', vista === vistaPedidosActual ? 'true' : 'false');
   });
 }
 
@@ -3028,37 +3067,37 @@ function htmlBloqueTotalesResumen(totales, opts = {}) {
   const bloqueTotalDelDia = ocultarTotalDelDia
     ? ''
     : `<div class="total-item total-total-dia">` +
-      `<span class="total-icon icon-total-dia"><i class="fa-solid fa-sack-dollar"></i></span>` +
+      `<span class="total-icon icon-total-dia">${uiIcon('banknote')}</span>` +
       `Pendiente por recoger: $${fmt(totales.totalDelDia)}` +
       `</div>`;
   const bloqueNequi = ocultarNequi
     ? ''
     : `<div class="total-item total-nequi" style="display:${showNequi}">` +
-      `<span class="total-icon icon-nequi"><i class="fa-solid fa-mobile-screen-button"></i></span>` +
+      `<span class="total-icon icon-nequi">${uiIcon('smartphone')}</span>` +
       `${etiquetaNequi}: $${fmtNeto(totales.totalPagadoNequi)}` +
       `</div>`;
   return (
     `<div class="totales-resumen">` +
     `<div class="total-item total-recogido-dia">` +
-    `<span class="total-icon icon-recogido-dia"><i class="fa-solid fa-sack-dollar"></i></span>` +
+    `<span class="total-icon icon-recogido-dia">${uiIcon('banknote')}</span>` +
     `Total recogido en el día: $${fmt(totales.recogidoDelDia)}` +
     `</div>` +
     `<div class="total-item total-pago-domiciliario" style="display:${showPagoDomiciliario}">` +
-    `<span class="total-icon icon-pago-domiciliario"><i class="fa-solid fa-motorcycle"></i></span>` +
+    `<span class="total-icon icon-pago-domiciliario">${uiIcon('bike')}</span>` +
     `Pago a domiciliario: $${fmt(totales.pagoDomiciliario)}` +
     `</div>` +
     `<div class="total-item total-entregar-tienda">` +
-    `<span class="total-icon icon-entregar-tienda"><i class="fa-solid fa-store"></i></span>` +
+    `<span class="total-icon icon-entregar-tienda">${uiIcon('store')}</span>` +
     `A entregar a tienda: $${fmt(totales.entregarTienda)}` +
     `</div>` +
     bloqueTotalDelDia +
     bloqueNequi +
     `<div class="total-item total-daviplata" style="display:${showDav}">` +
-    `<span class="total-icon icon-daviplata"><i class="fa-solid fa-wallet"></i></span>` +
+    `<span class="total-icon icon-daviplata">${uiIcon('wallet')}</span>` +
     `${etiquetaDav}: $${fmtNeto(totales.totalPagadoDaviplata)}` +
     `</div>` +
     `<div class="total-item total-efectivo" style="display:${showEfectivo}">` +
-    `<span class="total-icon icon-efectivo"><i class="fa-solid fa-money-bill-wave"></i></span>` +
+    `<span class="total-icon icon-efectivo">${uiIcon('banknote')}</span>` +
     `Recogido en efectivo: $${fmt(totales.totalPagadoEfectivo)}` +
     `</div>` +
     `</div>`
@@ -3553,46 +3592,46 @@ function crearTarjetaPedido(pedido, index) {
   const telefonoHtml = htmlTelefonosPedidoParaTarjeta(pedido) || (pedido.telefono ? String(pedido.telefono) : '');
   const valorFormato = obtenerValorAReclamarPedido(pedido).toLocaleString('es-CO');
   const btnNoEntregadoHtml = pedido.entregado
-    ? `<div class="pedido-no-entregado-wrap"><button class="btn-warning" onclick="marcarNoEntregado(${index})" style="width: 100%;"><i class="fa-solid fa-rotate-left"></i> No entregado</button></div>`
+    ? `<div class="pedido-no-entregado-wrap"><button class="btn-warning" onclick="marcarNoEntregado(${index})" style="width: 100%;">${uiIcon('rotate-ccw')} No entregado</button></div>`
     : '';
   const btnNotificarClientePorteriaHtml = pedidoPendienteNotificarClientePorteria(pedido)
-    ? `<div class="pedido-no-entregado-wrap"><button class="btn-notify" onclick="notificarClienteEntregaPorteria(${index}, ${pedido.id})" style="width: 100%;"><i class="fa-brands fa-whatsapp"></i> Notificar al cliente (portería)</button></div>`
+    ? `<div class="pedido-no-entregado-wrap"><button class="btn-notify" onclick="notificarClienteEntregaPorteria(${index}, ${pedido.id})" style="width: 100%;">${uiIcon('message-circle')} Notificar al cliente (portería)</button></div>`
     : '';
   const btnNotificarClienteNoEntregadoHtml = pedidoPendienteNotificarClienteNoEntregado(pedido)
-    ? `<div class="pedido-no-entregado-wrap"><button class="btn-notify" onclick="notificarClienteNoEntregado(${index}, ${pedido.id})" style="width: 100%;"><i class="fa-brands fa-whatsapp"></i> Notificar al cliente (no entregado)</button></div>`
+    ? `<div class="pedido-no-entregado-wrap"><button class="btn-notify" onclick="notificarClienteNoEntregado(${index}, ${pedido.id})" style="width: 100%;">${uiIcon('message-circle')} Notificar al cliente (no entregado)</button></div>`
     : '';
   const etapaActual = obtenerEtapaPedidoUI(pedido);
   let btnRegresarEtapaHtml = '';
   if (etapaActual === 'enRuta') {
-    btnRegresarEtapaHtml = `<button type="button" class="btn-info" onclick="marcarPendiente(${index})"><i class="fa-solid fa-rotate-left"></i> Regresar a pendientes</button>`;
+    btnRegresarEtapaHtml = `<button type="button" class="btn-info" onclick="marcarPendiente(${index})">${uiIcon('rotate-ccw')} Regresar a pendientes</button>`;
   } else if (etapaActual === 'enDestino') {
-    btnRegresarEtapaHtml = `<button type="button" class="btn-info" onclick="marcarRegresarAEnRuta(${index})"><i class="fa-solid fa-rotate-left"></i> Regresar a en ruta</button>`;
+    btnRegresarEtapaHtml = `<button type="button" class="btn-info" onclick="marcarRegresarAEnRuta(${index})">${uiIcon('rotate-ccw')} Regresar a en ruta</button>`;
   } else if (etapaActual === 'finalizado') {
-    btnRegresarEtapaHtml = `<button type="button" class="btn-info" onclick="marcarRegresarAEnRuta(${index})" style="width:100%;"><i class="fa-solid fa-rotate-left"></i> Regresar a en ruta</button>`;
+    btnRegresarEtapaHtml = `<button type="button" class="btn-info" onclick="marcarRegresarAEnRuta(${index})" style="width:100%;">${uiIcon('rotate-ccw')} Regresar a en ruta</button>`;
   }
   const btnReactivarCanceladoHtml =
     adminUi && pedido.cancelado
-      ? `<button class="btn-success" onclick="reactivarPedidoCancelado(${index})"><i class="fa-solid fa-rotate-left"></i> Reactivar pedido</button>`
+      ? `<button class="btn-success" onclick="reactivarPedidoCancelado(${index})">${uiIcon('rotate-ccw')} Reactivar pedido</button>`
       : '';
   const btnNotificarHtml =
     etapaActual === 'notificar'
-      ? `<button class="btn-notify" onclick="notificarEnCamino(${index}, ${pedido.id}, { abrirEnrutarDespues: true, directoWhatsApp: true, forzarReenvio: true })"><i class="fa-solid fa-bullhorn"></i> Notificar</button>`
+      ? `<button class="btn-notify" onclick="notificarEnCamino(${index}, ${pedido.id}, { abrirEnrutarDespues: true, directoWhatsApp: true, forzarReenvio: true })">${uiIcon('megaphone')} Notificar</button>`
       : '';
   const btnNotificarNuevamenteHtml = '';
   const btnEnrutarHtml = etapaActual === 'enrutar'
-    ? `<button class="btn-route" onclick="enrutarConApps(${index}, ${pedido.id})"><i class="fa-solid fa-route"></i> Enrutar</button>`
+    ? `<button class="btn-route" onclick="enrutarConApps(${index}, ${pedido.id})">${uiIcon('route')} Enrutar</button>`
     : '';
   const btnEnrutarNuevamenteHtml =
     etapaActual === 'enRuta'
-      ? `<button class="btn-route" onclick="enrutarConApps(${index}, ${pedido.id})"><i class="fa-solid fa-route"></i> Volver a enrutar</button>`
+      ? `<button class="btn-route" onclick="enrutarConApps(${index}, ${pedido.id})">${uiIcon('route')} Volver a enrutar</button>`
       : '';
   const btnLlegueDestinoHtml = etapaActual === 'enRuta'
-    ? `<button class="btn-primary" onclick="marcarLlegueDestino(${index}, ${pedido.id})"><i class="fa-solid fa-flag-checkered"></i> Llegué al destino</button>`
+    ? `<button class="btn-primary" onclick="marcarLlegueDestino(${index}, ${pedido.id})">${uiIcon('flag')} Llegué al destino</button>`
     : '';
   const bloqueAccionesDestinoHtml = etapaActual === 'enDestino'
     ? `
       <div class="pedido-actions-row">
-        <button class="btn-success" onclick="mostrarOpcionesFinalizarEntrega(${index}, ${pedido.id})"><i class="fa-solid fa-circle-check"></i> Finalizar entrega</button>
+        <button class="btn-success" onclick="mostrarOpcionesFinalizarEntrega(${index}, ${pedido.id})">${uiIcon('circle-check')} Finalizar entrega</button>
       </div>
     `
     : '';
@@ -3603,20 +3642,20 @@ function crearTarjetaPedido(pedido, index) {
     <div class="pedido-tools">
       ${mostrarContactoCliente ? `
       <details class="pedido-dropdown">
-        <summary class="btn-info"><i class="fa-solid fa-address-book"></i> Contacto</summary>
+        <summary class="btn-info">${uiIcon('contact')} Contacto</summary>
         <div class="pedido-dropdown-content">
-          <button class="btn-success" onclick="contactarPedido(${index}, 'wa_call')"><i class="fa-brands fa-whatsapp"></i> Llamar por WhatsApp</button>
-          <button class="btn-success" onclick="contactarPedido(${index}, 'wa_msg')"><i class="fa-brands fa-whatsapp"></i> Mensaje por WhatsApp</button>
-          <button class="btn-info" onclick="contactarPedido(${index}, 'call')"><i class="fa-solid fa-phone"></i> Llamada normal</button>
+          <button class="btn-success" onclick="contactarPedido(${index}, 'wa_call')">${uiIcon('message-circle')} Llamar por WhatsApp</button>
+          <button class="btn-success" onclick="contactarPedido(${index}, 'wa_msg')">${uiIcon('message-circle')} Mensaje por WhatsApp</button>
+          <button class="btn-info" onclick="contactarPedido(${index}, 'call')">${uiIcon('phone')} Llamada normal</button>
         </div>
       </details>` : ''}
       ${mostrarSoportePedido ? `
       <details class="pedido-dropdown">
-        <summary class="btn-support"><i class="fa-solid fa-headset"></i> Soporte</summary>
+        <summary class="btn-support">${uiIcon('headset')} Soporte</summary>
         <div class="pedido-dropdown-content">
-          <button class="btn-support" onclick="soporteLlamarWhatsApp()"><i class="fa-brands fa-whatsapp"></i> Llamar por WhatsApp</button>
-          <button class="btn-support" onclick="mostrarOpcionesMensajeSoporte(${index})"><i class="fa-solid fa-comment-dots"></i> Mensaje por WhatsApp</button>
-          <button class="btn-info" onclick="soporteLlamadaNormal()"><i class="fa-solid fa-phone"></i> Llamada normal</button>
+          <button class="btn-support" onclick="soporteLlamarWhatsApp()">${uiIcon('message-circle')} Llamar por WhatsApp</button>
+          <button class="btn-support" onclick="mostrarOpcionesMensajeSoporte(${index})">${uiIcon('message-square')} Mensaje por WhatsApp</button>
+          <button class="btn-info" onclick="soporteLlamadaNormal()">${uiIcon('phone')} Llamada normal</button>
         </div>
       </details>` : ''}
     </div>`
@@ -3630,8 +3669,8 @@ function crearTarjetaPedido(pedido, index) {
     <div class="pedido-header">
       <div class="pedido-numero">Pedido #${pedido.id}${estadoTexto}</div>
       <div class="pedido-header-btns">
-        ${adminUi && !pedido.cancelado ? `<button type="button" class="btn-edit" onclick="event.preventDefault(); event.stopPropagation(); editarPedido(${index})" style="padding: 5px 10px; font-size: 12px;"><i class="fa-solid fa-pen-to-square"></i> Editar</button>` : ''}
-        ${adminUi ? `<button class="btn-danger btn-icon-only" onclick="eliminarPedido(${index})" title="Eliminar pedido" aria-label="Eliminar pedido"><i class="fa-solid fa-trash"></i></button>` : ''}
+        ${adminUi && !pedido.cancelado ? `<button type="button" class="btn-edit" onclick="event.preventDefault(); event.stopPropagation(); editarPedido(${index})" style="padding: 5px 10px; font-size: 12px;">${uiIcon('square-pen')} Editar</button>` : ''}
+        ${adminUi ? `<button class="btn-danger btn-icon-only" onclick="eliminarPedido(${index})" title="Eliminar pedido" aria-label="Eliminar pedido">${uiIcon('trash')}</button>` : ''}
       </div>
     </div>
     <div class="pedido-cliente">${escapeHtmlTexto(String(pedido.nombre || '').trim() || 'No especificado')}</div>
@@ -3639,13 +3678,13 @@ function crearTarjetaPedido(pedido, index) {
       <strong>Teléfono:</strong> ${telefonoHtml || 'No especificado'}<br>
       <strong>Dirección:</strong> ${pedido.direccion || 'No especificada'}
       <button class="btn-copy-inline" onclick="copiarDireccionPedido(${index})" title="Copiar dirección">
-        <i class="fa-regular fa-copy"></i> Copiar
+        ${uiIcon('copy')} Copiar
       </button><br>
       <strong class="pedido-etiqueta-productos">Productos:</strong><div class="pedido-productos-lista">${htmlProductosPedidoMultilinea(pedido)}</div><div class="pedido-fila-valor"><strong>Valor:</strong> $${valorFormato}${pedido.valorModificado ? ' <span class="pedido-valor-modificado">(modificado)</span>' : ''}</div>
     </div>
     ${
       adminUi
-        ? `<div class="pedido-asignacion"><label class="pedido-asignacion-label" for="asignSel_${pedido.id}"><i class="fa-solid fa-motorcycle"></i> Asignar a mensajero</label><select id="asignSel_${pedido.id}" class="pedido-asignacion-select" data-asign-pedido-id="${pedido.id}" data-prev-value="${escapeHtmlAttr(String(pedido.assignedTo || ''))}" onchange="asignarPedidoDesdeSelect(this)">${htmlOpcionesMensajerosSelect(pedido)}</select></div>`
+        ? `<div class="pedido-asignacion"><label class="pedido-asignacion-label" for="asignSel_${pedido.id}">${uiIcon('bike')} Asignar a mensajero</label><select id="asignSel_${pedido.id}" class="pedido-asignacion-select" data-asign-pedido-id="${pedido.id}" data-prev-value="${escapeHtmlAttr(String(pedido.assignedTo || ''))}" onchange="asignarPedidoDesdeSelect(this)">${htmlOpcionesMensajerosSelect(pedido)}</select></div>`
         : ''
     }
     ${bloqueHerramientasPedidoHtml}
@@ -3746,7 +3785,7 @@ function renderListaOrdenEntrega() {
             marcarPendiente(idxGlobal);
           });
         }
-        bPend.innerHTML = '<i class="fa-solid fa-rotate-left" aria-hidden="true"></i>';
+        bPend.innerHTML = uiIcon('rotate-ccw');
         acciones.appendChild(bPend);
       }
     }
@@ -5240,7 +5279,7 @@ function asegurarModalPagoEntregado() {
   modal.innerHTML = `
     <div class="modal-no-entregado-card modal-no-entregado-card--con-cerrar-x">
       <button type="button" class="modal-no-entregado-close-x" onclick="cerrarModalPagoEntregado()" aria-label="Cerrar">
-        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        ${uiIcon('x')}
       </button>
       <h3>Foto evidencia entregado</h3>
       <div id="pasoLugarEntrega" style="display:block;">
@@ -5859,7 +5898,7 @@ function asegurarModalDevolucionCliente() {
   modal.innerHTML = `
     <div class="modal-no-entregado-card modal-no-entregado-card--con-cerrar-x">
       <button type="button" class="modal-no-entregado-close-x" onclick="cerrarModalDevolucionCliente()" aria-label="Cerrar">
-        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        ${uiIcon('x')}
       </button>
       <h3>Foto devolución</h3>
       <p>Indica el monto a regresarle al cliente y el método de devolución.</p>
@@ -6254,7 +6293,7 @@ function asegurarModalNoEntregado() {
   modal.innerHTML = `
     <div class="modal-no-entregado-card modal-no-entregado-card--con-cerrar-x">
       <button type="button" class="modal-no-entregado-close-x" onclick="cerrarModalNoEntregado()" aria-label="Cerrar">
-        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        ${uiIcon('x')}
       </button>
       <h3>No entregado</h3>
       <div id="pasoNoEntregadoUbicacion" style="display:block;">
@@ -8105,7 +8144,7 @@ async function abrirModalRespaldoTexto() {
       '<label for="textoRespaldoPayload" class="qr-pedidos-label">Código de respaldo</label>' +
       '<textarea id="textoRespaldoPayload" class="qr-pedidos-textarea" readonly rows="6" spellcheck="false"></textarea>' +
       '<div class="qr-pedidos-acciones">' +
-      '<button type="button" class="btn-primary" onclick="copiarTextoRespaldo()"><i class="fa-regular fa-copy"></i> Copiar texto</button>' +
+      '<button type="button" class="btn-primary" onclick="copiarTextoRespaldo()">' + uiIcon('copy') + ' Copiar texto</button>' +
       '<button type="button" class="modal-no-entregado-close" onclick="cerrarModalTextoRespaldo()">Cerrar</button>' +
       '</div>' +
       '</div>';
@@ -8630,8 +8669,14 @@ function switchAuthTab(which) {
   const formLogin = document.getElementById('formLogin');
   const formReg = document.getElementById('formRegistro');
   const esLogin = which === 'login';
-  if (tabLogin) tabLogin.classList.toggle('active', esLogin);
-  if (tabReg) tabReg.classList.toggle('active', !esLogin);
+  if (tabLogin) {
+    tabLogin.classList.toggle('active', esLogin);
+    tabLogin.setAttribute('aria-selected', esLogin ? 'true' : 'false');
+  }
+  if (tabReg) {
+    tabReg.classList.toggle('active', !esLogin);
+    tabReg.setAttribute('aria-selected', esLogin ? 'false' : 'true');
+  }
   if (formLogin) formLogin.style.display = esLogin ? 'block' : 'none';
   if (formReg) formReg.style.display = esLogin ? 'none' : 'block';
   if (!esLogin) actualizarTextosRegistroAuth();
@@ -9239,7 +9284,7 @@ async function refrescarListaUsuariosPagina() {
         btnDel.className = 'modal-usuarios-btn-eliminar';
         btnDel.title = 'Eliminar usuario';
         btnDel.setAttribute('aria-label', 'Eliminar usuario');
-        btnDel.innerHTML = '<i class="fa-solid fa-trash" aria-hidden="true"></i>';
+        btnDel.innerHTML = uiIcon('trash');
         btnDel.addEventListener('click', () => {
           void eliminarUsuarioAdminDesdeModal(Number(u.id), String(u.username || ''));
         });
@@ -9837,7 +9882,7 @@ function htmlBloquePorMensajeroHistorial(dia) {
           .join('');
         return (
           `<div class="historial-mensajero-card">` +
-          `<p class="historial-mensajero-nombre"><i class="fa-solid fa-motorcycle" aria-hidden="true"></i> ${escapeHtmlTexto(m.nombre || 'Sin asignar')}` +
+          `<p class="historial-mensajero-nombre">${uiIcon('bike')} ${escapeHtmlTexto(m.nombre || 'Sin asignar')}` +
           ` <span class="historial-mensajero-meta">${Number(m.entregados || 0)} entregado(s)</span></p>` +
           `<ul class="historial-mensajero-pedidos">${pedidosHtml || '<li>Sin pedidos</li>'}</ul>` +
           `</div>`

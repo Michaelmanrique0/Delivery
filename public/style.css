@@ -293,9 +293,32 @@ button {
 }
 
 button i,
+button .icon-ui,
 .pedidos-tab i,
-.pedido-dropdown summary i {
+.pedidos-tab .icon-ui,
+.pedido-dropdown summary i,
+.pedido-dropdown summary .icon-ui,
+h2 .icon-ui,
+h3 .icon-ui {
   margin-right: 8px;
+}
+
+.icon-ui {
+  width: 1.15em;
+  height: 1.15em;
+  display: inline-block;
+  vertical-align: -0.2em;
+  flex-shrink: 0;
+}
+
+.icon-ui--whatsapp {
+  color: #25d366;
+}
+
+[data-lucide] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 #listaPedidos {
@@ -752,6 +775,8 @@ button i,
 #mapa {
   width: 100%;
   height: 500px;
+  min-height: 320px;
+  aspect-ratio: auto;
   min-height: 320px;
   border-radius: 10px;
   border: 2px solid #ddd;
@@ -2237,7 +2262,9 @@ button i,
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.btn-menu-hamburger i {
+.btn-menu-hamburger i,
+.btn-menu-hamburger .icon-ui,
+.btn-menu-hamburger [data-lucide] {
   display: flex;
   align-items: center;
   justify-content: center;

@@ -1,0 +1,19 @@
+---
+description: Reglas estrictas de rendimiento y UI para desarrollo Frontend
+globs: *.tsx, *.ts, *.jsx, *.js
+---
+# UI y Estilos (Modernidad)
+- Usa siempre Tailwind CSS para los estilos.
+- Prioriza interfaces minimalistas, limpias y accesibles (ARIA tags obligatorios).
+- Construye componentes pequeños, modulares y reutilizables.
+- Si faltan íconos, usa Lucide React.
+
+# Rendimiento (Performance)
+- Nunca uses dependencias pesadas si existe una alternativa nativa moderna.
+- Implementa "lazy loading" (carga diferida) para componentes que no son visibles en la carga inicial.
+- Optimiza siempre las imágenes (ej. usando `next/image` si estás en Next.js) estableciendo tamaños explícitos para evitar el Cumulative Layout Shift (CLS).
+- Evita los re-renders innecesarios. Usa `useMemo` y `useCallback` solo donde haya cálculos costosos o problemas reales de renderizado.
+
+# Calidad de Código
+- Escribe código funcional y declarativo en TypeScript.
+- Tipa estrictamente todas las props y respuestas de las APIs.
