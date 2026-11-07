@@ -11,7 +11,7 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
 <link rel="stylesheet" href="tailwind.css?v=20261106mobfix">
-<link rel="stylesheet" href="style.css?v=20261106totales">
+<link rel="stylesheet" href="style.css?v=20261106tienda">
 <script>
 (function () {
   try {
@@ -174,6 +174,7 @@
           </button>
           <div id="menuUsuarioPanel" class="menu-usuario-panel" style="display:none;" role="menu" aria-label="Menú de la cuenta">
             <button type="button" class="menu-usuario-accion" role="menuitem" onclick="menuIrAlInicio()"><span data-lucide="house"></span> Inicio</button>
+            <button type="button" id="btnMenuCambiarTienda" class="menu-usuario-accion" role="menuitem" onclick="abrirModalCambiarTienda()"><span data-lucide="store"></span> Cambiar de tienda</button>
             <button type="button" id="btnMenuUsuarios" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirPaginaUsuariosRoles()"><span data-lucide="users"></span> Usuarios y roles</button>
             <button type="button" id="btnMenuHistorialEntregas" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirPaginaHistorialEntregas()"><span data-lucide="calendar-days"></span> Historial de entregas</button>
             <button type="button" id="btnMediosPagoMenu" class="menu-usuario-accion" style="display:none;" role="menuitem" onclick="abrirConfigNotificacionDesdeMenu()"><span data-lucide="sliders"></span> Medios de pago (notificación al cliente)</button>
@@ -183,6 +184,24 @@
       </div>
     </div>
   </header>
+
+  <div id="modalCambiarTienda" class="modal-no-entregado-backdrop" style="display:none;" aria-hidden="true">
+    <div class="modal-no-entregado-card bento-card" role="dialog" aria-labelledby="tituloCambiarTienda" aria-modal="true">
+      <h3 id="tituloCambiarTienda">Cambiar de tienda</h3>
+      <p class="bento-help">Elige la tienda para la que estás trabajando ahora. Verás y crearás pedidos solo de esa tienda.</p>
+      <p id="cambiarTiendaError" class="auth-form-error" role="alert"></p>
+      <div id="listaTiendasCambio" class="lista-tiendas-cambio" role="radiogroup" aria-label="Tiendas"></div>
+      <div id="bloqueNuevaTiendaAdmin" class="bloque-nueva-tienda" style="display:none;">
+        <label class="modal-usuarios-mini-label" for="inputNuevaTiendaNombre">Nueva tienda</label>
+        <input type="text" id="inputNuevaTiendaNombre" class="ui-input" maxlength="80" placeholder="Nombre de la tienda" autocomplete="off">
+        <button type="button" class="btn-info rounded-2xl" onclick="void crearTiendaDesdeUI()">Añadir tienda</button>
+      </div>
+      <div class="modal-no-entregado-actions">
+        <button type="button" class="btn-primary rounded-2xl" onclick="void confirmarCambioTienda()">Usar esta tienda</button>
+      </div>
+      <button type="button" class="modal-no-entregado-close" onclick="cerrarModalCambiarTienda()">Cerrar</button>
+    </div>
+  </div>
 
   <div id="modalConfigNotificacion" class="modal-no-entregado-backdrop">
     <div class="modal-no-entregado-card configuracion-notificacion-panel bento-card">
@@ -415,7 +434,7 @@
 
 <script src="ui/lucide.js?v=20261106bento"></script>
 <script src="ui/theme.js?v=20261106bento"></script>
-<script src="app.js?v=20261106mobfix" defer></script>
+<script src="app.js?v=20261106tienda" defer></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {

@@ -59,6 +59,9 @@ let pedidosLocalRev = 0;
 let rutaLocalRev = 0;
 /** Lista de mensajeros para asignación (solo admin). */
 let listaMensajerosCache = [];
+const TIENDA_DEFAULT_ID = 'tienda-principal';
+let catalogoTiendas = [{ id: TIENDA_DEFAULT_ID, nombre: 'Tienda principal' }];
+let tiendaActivaId = TIENDA_DEFAULT_ID;
 
 function esSesionAdmin() {
   return !!sesionUsuario && sesionUsuario.role === 'admin';
@@ -71,6 +74,122 @@ function esSesionMensajero() {
 /** Mensajero autorizado por admin a revisar/editar el valor del pedido. */
 function mensajeroPuedeModificarValorPedido() {
   return esSesionMensajero() && !!sesionUsuario?.puedeModificarValor;
+}
+
+function idTiendaPedido(pedido) {
+  const id = String(pedido?.tiendaId || '').trim();
+  return id || TIENDA_DEFAULT_ID;
+}
+
+function pedidosDeTiendaActiva() {
+  const tid = String(tiendaActivaId || TIENDA_DEFAULT_ID);
+  return pedidos.filter((p) => idTiendaPedido(p) === tid);
+}
+
+function nombreTiendaActiva() {
+  const t = catalogoTiendas.find((x) => String(x.id) === String(tiendaActivaId));
+  return (t && t.nombre) || 'Tienda principal';
+}
+
+function actualizarTextoCabeceraUsuario() {
+  const el = document.getElementById('appHeaderUsuario');
+  if (!el || !sesionUsuario) return;
+  const rol = sesionUsuario.role === 'admin' ? 'Administrador' : 'Mensajero';
+  el.textContent = `${sesionUsuario.username} · ${rol} · ${nombreTiendaActiva()}`;
+}
+
+async function cargarTiendasDesdeApi() {
+  const data = await apiJson('/api/tiendas', { method: 'GET' });
+  catalogoTiendas = Array.isArray(data.tiendas) && data.tiendas.length
+    ? data.tiendas
+    : [{ id: TIENDA_DEFAULT_ID, nombre: 'Tienda principal' }];
+  tiendaActivaId = String(data.tiendaActivaId || catalogoTiendas[0].id);
+  actualizarTextoCabeceraUsuario();
+  return data;
+}
+
+function cerrarModalCambiarTienda() {
+  const modal = document.getElementById('modalCambiarTienda');
+  if (modal) modal.style.display = 'none';
+}
+
+function pintarListaTiendasCambio() {
+  const host = document.getElementById('listaTiendasCambio');
+  if (!host) return;
+  host.innerHTML = catalogoTiendas
+    .map((t) => {
+      const id = String(t.id);
+      const checked = id === String(tiendaActivaId) ? ' checked' : '';
+      return (
+        '<label class="config-check tienda-opcion-radio">' +
+        `<input type="radio" name="tiendaActivaOpcion" value="${escapeHtmlAttr(id)}"${checked}>` +
+        `<span>${escapeHtmlTexto(t.nombre || 'Tienda')}</span>` +
+        '</label>'
+      );
+    })
+    .join('');
+}
+
+function abrirModalCambiarTienda() {
+  cerrarMenuUsuario();
+  const modal = document.getElementById('modalCambiarTienda');
+  if (!modal) return;
+  const adminWrap = document.getElementById('bloqueNuevaTiendaAdmin');
+  if (adminWrap) adminWrap.style.display = esSesionAdmin() ? '' : 'none';
+  const err = document.getElementById('cambiarTiendaError');
+  if (err) err.textContent = '';
+  pintarListaTiendasCambio();
+  modal.style.display = 'flex';
+}
+
+async function crearTiendaDesdeUI() {
+  const input = document.getElementById('inputNuevaTiendaNombre');
+  const err = document.getElementById('cambiarTiendaError');
+  if (err) err.textContent = '';
+  const nombre = input ? String(input.value || '').trim() : '';
+  if (nombre.length < 2) {
+    if (err) err.textContent = 'Escribe un nombre de tienda (mínimo 2 caracteres).';
+    return;
+  }
+  try {
+    const data = await apiJson('/api/tiendas', {
+      method: 'POST',
+      body: JSON.stringify({ nombre }),
+    });
+    catalogoTiendas = Array.isArray(data.tiendas) ? data.tiendas : catalogoTiendas;
+    if (data.tienda && data.tienda.id) tiendaActivaId = data.tienda.id;
+    if (input) input.value = '';
+    pintarListaTiendasCambio();
+    mostrarToast('Tienda creada.', 'success');
+  } catch (e) {
+    if (err) err.textContent = String(e.message || e);
+  }
+}
+
+async function confirmarCambioTienda() {
+  const err = document.getElementById('cambiarTiendaError');
+  if (err) err.textContent = '';
+  const elegido = document.querySelector('input[name="tiendaActivaOpcion"]:checked');
+  const id = elegido ? String(elegido.value || '').trim() : '';
+  if (!id) {
+    if (err) err.textContent = 'Elige una tienda.';
+    return;
+  }
+  try {
+    const data = await apiJson('/api/tiendas/activa', {
+      method: 'PUT',
+      body: JSON.stringify({ id }),
+    });
+    tiendaActivaId = String(data.tiendaActivaId || id);
+    if (Array.isArray(data.tiendas) && data.tiendas.length) catalogoTiendas = data.tiendas;
+    actualizarTextoCabeceraUsuario();
+    cerrarModalCambiarTienda();
+    renderPedidos();
+    actualizarMarcadores();
+    mostrarToast(`Ahora trabajas en ${nombreTiendaActiva()}.`, 'success');
+  } catch (e) {
+    if (err) err.textContent = String(e.message || e);
+  }
 }
 
 function appEstaOnline() {
@@ -2109,6 +2228,7 @@ function seleccionarTelefonoConModal(tels, titulo, onElegir) {
 
 function pedidoNuevoBase() {
   return {
+    tiendaId: String(tiendaActivaId || TIENDA_DEFAULT_ID),
     assignedTo: null,
     createdBy: null,
     enCurso: false,
@@ -3267,6 +3387,7 @@ function renderPedidos() {
   const entregados = [];
   const cancelados = [];
   pedidos.forEach((pedido, index) => {
+    if (idTiendaPedido(pedido) !== String(tiendaActivaId || TIENDA_DEFAULT_ID)) return;
     if (pedido.cancelado) cancelados.push({ pedido, index });
     else if (pedido.entregado) entregados.push({ pedido, index });
     else if (pedido.enCurso && pedido.notificadoEnCamino) enCurso.push({ pedido, index });
@@ -3287,11 +3408,11 @@ function renderPedidos() {
     vistaPedidosActual = 'pendientes';
   }
 
-  if (pedidos.length === 0) {
+  if (pedidosDeTiendaActiva().length === 0) {
     vistaPedidosActual = 'pendientes';
     vistaPedidosSeleccionadaManual = false;
     const subVacio = esSesionMensajero()
-      ? 'Aún no tienes pedidos asignados. Cuando un administrador te asigne entregas, aparecerán aquí y podrás ordenar la ruta en el mapa.'
+      ? 'Aún no tienes pedidos asignados en esta tienda. Cuando un administrador te asigne entregas, aparecerán aquí y podrás ordenar la ruta en el mapa.'
       : 'Pega un pedido desde WhatsApp en el cuadro de arriba.';
     lista.innerHTML = `<div class="empty-state" id="emptyState"><p>No hay pedidos aún</p><p class="text-sm">${escapeHtmlAttr(subVacio)}</p></div>`;
     actualizarPestañasListaPedidos([], [], [], []);
@@ -3323,7 +3444,7 @@ function renderPedidos() {
   renderTotalesAdminPorMensajero();
 
   const elResumen = document.getElementById('totalesResumen');
-  const totales = calcularTotalesEntregaPedidos(pedidos);
+  const totales = calcularTotalesEntregaPedidos(pedidosDeTiendaActiva());
   if (elResumen) {
     const elTotalDelDia = document.getElementById('totalDelDia');
     const elRecogidoDia = document.getElementById('totalRecogidoDia');
@@ -3400,15 +3521,16 @@ function renderPedidos() {
 
 function cambiarVistaPedidos(vista) {
   if (!['pendientes', 'enCurso', 'entregados', 'cancelados'].includes(vista)) return;
+  const vistaPed = pedidosDeTiendaActiva();
   let n = 0;
   if (vista === 'pendientes') {
-    n = pedidos.filter((p) => !p.cancelado && !p.entregado && !(p.enCurso && p.notificadoEnCamino)).length;
+    n = vistaPed.filter((p) => !p.cancelado && !p.entregado && !(p.enCurso && p.notificadoEnCamino)).length;
   } else if (vista === 'enCurso') {
-    n = pedidos.filter((p) => !p.cancelado && !p.entregado && p.enCurso && p.notificadoEnCamino).length;
+    n = vistaPed.filter((p) => !p.cancelado && !p.entregado && p.enCurso && p.notificadoEnCamino).length;
   } else if (vista === 'entregados') {
-    n = pedidos.filter((p) => p.entregado).length;
+    n = vistaPed.filter((p) => p.entregado).length;
   } else if (vista === 'cancelados') {
-    n = pedidos.filter((p) => p.cancelado).length;
+    n = vistaPed.filter((p) => p.cancelado).length;
   }
   if (vista !== 'pendientes' && n === 0) return;
   vistaPedidosSeleccionadaManual = true;
@@ -3725,7 +3847,7 @@ function renderListaOrdenEntrega() {
   const listaOrden = document.getElementById('listaOrdenEntrega');
   if (!listaOrden) return;
 
-  const pedidosActivos = pedidos.filter(p => !p.entregado && !p.cancelado);
+  const pedidosActivos = pedidosDeTiendaActiva().filter(p => !p.entregado && !p.cancelado);
   if (pedidosActivos.length === 0) {
     listaOrden.innerHTML = '<div class="orden-vacio">No hay pedidos activos</div>';
     return;
@@ -4453,20 +4575,21 @@ async function eliminarTodos() {
       await cargarMensajerosParaAsignacion();
     } catch (_e) {}
   }
-  const avisoAsignado = resumenAsignacionesParaBorrar(pedidos);
+  const deEstaTienda = pedidosDeTiendaActiva();
+  const avisoAsignado = resumenAsignacionesParaBorrar(deEstaTienda);
   const texto = avisoAsignado
-    ? `¿Eliminar TODOS los pedidos?\n\n${avisoAsignado}`
-    : '¿Estás seguro de eliminar TODOS los pedidos? Esta acción no se puede deshacer.';
+    ? `¿Eliminar todos los pedidos de ${nombreTiendaActiva()}?\n\n${avisoAsignado}`
+    : `¿Eliminar todos los pedidos de ${nombreTiendaActiva()}? Esta acción no se puede deshacer. Los de otras tiendas se conservan.`;
   mostrarModalDecision({
-    titulo: 'Eliminar todos los pedidos',
+    titulo: 'Eliminar pedidos de esta tienda',
     texto,
     textoConfirmar: 'Eliminar',
     textoCancelar: 'Cancelar',
     claseConfirmar: 'btn-danger',
     mostrarSecundario: false,
     onConfirmar: () => {
-      pedidos = [];
-      nextPedidoId = 1;
+      const tid = String(tiendaActivaId || TIENDA_DEFAULT_ID);
+      pedidos = pedidos.filter((p) => idTiendaPedido(p) !== tid);
       vistaPedidosActual = 'pendientes';
       vistaPedidosSeleccionadaManual = false;
       guardarPedidos();
@@ -7421,7 +7544,7 @@ function actualizarMarcadores(opciones) {
 
   let completados = 0;
   let huboSincCoordsDesdeUrl = false;
-  const conUbicacion = pedidos.filter(p => !p.cancelado && (p.coords || p.mapUrl || p.direccion));
+  const conUbicacion = pedidosDeTiendaActiva().filter(p => !p.cancelado && (p.coords || p.mapUrl || p.direccion));
   const total = conUbicacion.length;
   if (total === 0) return;
 
@@ -8496,6 +8619,14 @@ let authHayUsuarios = false;
 async function iniciarApp() {
   if (!sesionUsuario) return;
   aplicarVisibilidadPorRol();
+  if (appEstaOnline()) {
+    try {
+      await cargarTiendasDesdeApi();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+  actualizarTextoCabeceraUsuario();
   exponerDebugAppDelivery();
   actualizarBannerOffline();
   configurarFlushSyncPedidosAlSalir();
@@ -8639,10 +8770,7 @@ async function entrarAppConSesion(user) {
   const main = document.getElementById('mainApp');
   if (pa) pa.style.display = 'none';
   if (main) main.style.display = '';
-  const el = document.getElementById('appHeaderUsuario');
-  if (el) {
-    el.textContent = `${user.username} · ${user.role === 'admin' ? 'Administrador' : 'Mensajero'}`;
-  }
+  actualizarTextoCabeceraUsuario();
   aplicarVisibilidadPorRol();
   if (appEstaOnline()) {
     try {

@@ -1050,6 +1050,104 @@ app.put(
   })
 );
 
+// --- Tiendas (para quién trabaja el usuario) ---
+const TIENDAS_META_KEY = 'tiendas_v1';
+const TIENDA_ACTIVA_META_KEY = 'usuario_tienda_activa_v1';
+const TIENDA_DEFAULT = { id: 'tienda-principal', nombre: 'Tienda principal' };
+
+function parseJsonMeta(raw, fallback) {
+  try {
+    const v = JSON.parse(String(raw || ''));
+    return v && typeof v === 'object' ? v : fallback;
+  } catch (_e) {
+    return fallback;
+  }
+}
+
+async function asegurarCatalogoTiendas() {
+  const data = parseJsonMeta(await getMeta(TIENDAS_META_KEY), null);
+  if (data && Array.isArray(data.tiendas) && data.tiendas.length) {
+    const tiendas = data.tiendas
+      .map((t) => ({
+        id: String(t && t.id ? t.id : '').trim(),
+        nombre: String(t && t.nombre ? t.nombre : '').trim(),
+      }))
+      .filter((t) => t.id && t.nombre);
+    if (tiendas.length) {
+      return { tiendas, defaultId: data.defaultId || tiendas[0].id };
+    }
+  }
+  const inicial = { tiendas: [TIENDA_DEFAULT], defaultId: TIENDA_DEFAULT.id };
+  await setMeta(TIENDAS_META_KEY, JSON.stringify(inicial));
+  return inicial;
+}
+
+async function mapaTiendaActivaUsuarios() {
+  const raw = parseJsonMeta(await getMeta(TIENDA_ACTIVA_META_KEY), {});
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+}
+
+app.get(
+  '/api/tiendas',
+  asyncHandler(authMiddleware),
+  asyncHandler(async (req, res) => {
+    const catalogo = await asegurarCatalogoTiendas();
+    const mapa = await mapaTiendaActivaUsuarios();
+    const uid = String(req.user.id);
+    let activaId = String(mapa[uid] || catalogo.defaultId || catalogo.tiendas[0].id);
+    if (!catalogo.tiendas.some((t) => t.id === activaId)) {
+      activaId = catalogo.defaultId || catalogo.tiendas[0].id;
+    }
+    res.json({
+      tiendas: catalogo.tiendas,
+      defaultId: catalogo.defaultId,
+      tiendaActivaId: activaId,
+    });
+  })
+);
+
+app.post(
+  '/api/tiendas',
+  asyncHandler(authMiddleware),
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const nombre = String(req.body?.nombre || '').trim();
+    if (nombre.length < 2) {
+      res.status(400).json({ error: 'Indica un nombre de tienda (mínimo 2 caracteres).' });
+      return;
+    }
+    const catalogo = await asegurarCatalogoTiendas();
+    const repetida = catalogo.tiendas.some(
+      (t) => String(t.nombre).toLowerCase() === nombre.toLowerCase()
+    );
+    if (repetida) {
+      res.status(400).json({ error: 'Ya hay una tienda con ese nombre.' });
+      return;
+    }
+    const id = `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    catalogo.tiendas.push({ id, nombre });
+    await setMeta(TIENDAS_META_KEY, JSON.stringify(catalogo));
+    res.status(201).json({ ok: true, tienda: { id, nombre }, tiendas: catalogo.tiendas });
+  })
+);
+
+app.put(
+  '/api/tiendas/activa',
+  asyncHandler(authMiddleware),
+  asyncHandler(async (req, res) => {
+    const catalogo = await asegurarCatalogoTiendas();
+    const id = String(req.body?.id || '').trim();
+    if (!catalogo.tiendas.some((t) => t.id === id)) {
+      res.status(400).json({ error: 'Esa tienda no existe.' });
+      return;
+    }
+    const mapa = await mapaTiendaActivaUsuarios();
+    mapa[String(req.user.id)] = id;
+    await setMeta(TIENDA_ACTIVA_META_KEY, JSON.stringify(mapa));
+    res.json({ ok: true, tiendaActivaId: id, tiendas: catalogo.tiendas });
+  })
+);
+
 // --- Users (admin) ---
 
 app.get('/api/users', asyncHandler(authMiddleware), requireAdmin, asyncHandler(async (_req, res) => {

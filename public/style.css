@@ -2512,6 +2512,42 @@ button.fab-app-btn[data-lucide] {
   pointer-events: none;
 }
 
+.lista-tiendas-cambio {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 1rem;
+  max-height: min(40vh, 280px);
+  overflow: auto;
+}
+
+.tienda-opcion-radio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tienda-opcion-radio:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.bloque-nueva-tienda {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
