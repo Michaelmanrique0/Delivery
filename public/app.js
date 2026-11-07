@@ -168,35 +168,110 @@ function digitosTelefonoConfirmacionTienda(tiendaId) {
 }
 
 function cargarTelefonoConfirmacionTiendaEnUI() {
-  const input = document.getElementById('cfgTiendaTelefonoConfirmacion');
-  const hint = document.getElementById('cfgTiendaTelefonoConfirmacionHint');
-  if (input) input.value = digitosTelefonoConfirmacionTienda(tiendaActivaId);
-  if (hint) {
-    hint.textContent = `Chat de WhatsApp para confirmar entregas de ${nombreTiendaActiva()}.`;
-  }
+  pintarListaTiendasAdmin();
 }
 
-async function guardarTelefonoConfirmacionTiendaDesdeUI() {
-  if (!esSesionAdmin()) return;
-  const input = document.getElementById('cfgTiendaTelefonoConfirmacion');
+function pintarListaTiendasAdmin() {
+  const host = document.getElementById('listaTiendasAdmin');
+  if (!host) return;
+  const puedeBorrar = catalogoTiendas.length > 1;
+  host.innerHTML = catalogoTiendas
+    .map((t) => {
+      const id = String(t.id);
+      const tel = String(t.telefonoConfirmacion || '').replace(/\D/g, '');
+      const activa = id === String(tiendaActivaId);
+      return (
+        `<article class="tienda-admin-card" data-tienda-id="${escapeHtmlAttr(id)}">` +
+        `<div class="tienda-admin-card-campos">` +
+        `<label>Nombre` +
+        `<input type="text" class="ui-input tienda-admin-nombre" maxlength="80" value="${escapeHtmlAttr(t.nombre || '')}" autocomplete="off">` +
+        `</label>` +
+        `<label>WhatsApp de confirmación` +
+        `<input type="text" class="ui-input tienda-admin-telefono" inputmode="numeric" maxlength="15" value="${escapeHtmlAttr(tel)}" placeholder="10 dígitos" autocomplete="off">` +
+        `</label>` +
+        `</div>` +
+        `<div class="tienda-admin-card-acciones">` +
+        `<button type="button" class="btn-primary rounded-2xl tienda-admin-guardar">${uiIcon('square-pen')} Guardar</button>` +
+        `<button type="button" class="btn-danger rounded-2xl tienda-admin-eliminar"${puedeBorrar ? '' : ' disabled'}>${uiIcon('x')} Eliminar</button>` +
+        (activa ? '<span class="config-notificacion-ayuda" style="margin:0;">En uso ahora</span>' : '') +
+        `</div>` +
+        `</article>`
+      );
+    })
+    .join('');
+  host.querySelectorAll('.tienda-admin-card').forEach((card) => {
+    const id = card.getAttribute('data-tienda-id');
+    const btnG = card.querySelector('.tienda-admin-guardar');
+    const btnE = card.querySelector('.tienda-admin-eliminar');
+    if (btnG) btnG.addEventListener('click', () => void guardarTiendaAdminDesdeCard(card, id));
+    if (btnE && !btnE.disabled) btnE.addEventListener('click', () => confirmarEliminarTiendaAdmin(id));
+  });
+}
+
+function aplicarCatalogoTiendasDesdeRespuesta(data) {
+  if (Array.isArray(data && data.tiendas) && data.tiendas.length) catalogoTiendas = data.tiendas;
+  if (data && data.tiendaActivaId) tiendaActivaId = String(data.tiendaActivaId);
+  if (!catalogoTiendas.some((t) => String(t.id) === String(tiendaActivaId))) {
+    tiendaActivaId = catalogoTiendas[0] ? String(catalogoTiendas[0].id) : TIENDA_DEFAULT_ID;
+  }
+  actualizarTextoCabeceraUsuario();
+  pintarListaTiendasAdmin();
+  pintarListaTiendasCambio();
+  renderPedidos();
+  actualizarMarcadores();
+}
+
+async function guardarTiendaAdminDesdeCard(card, id) {
+  if (!esSesionAdmin() || !card || !id) return;
   const err = document.getElementById('configTiendaConfirmacionError');
   if (err) err.textContent = '';
-  const telefonoConfirmacion = String(input ? input.value : '').replace(/\D/g, '');
+  const nombre = String(card.querySelector('.tienda-admin-nombre')?.value || '').trim();
+  const telefonoConfirmacion = String(card.querySelector('.tienda-admin-telefono')?.value || '').replace(/\D/g, '');
+  if (nombre.length < 2) {
+    if (err) err.textContent = 'El nombre de la tienda debe tener al menos 2 caracteres.';
+    return;
+  }
   if (telefonoConfirmacion && (telefonoConfirmacion.length < 10 || telefonoConfirmacion.length > 15)) {
     if (err) err.textContent = 'El número debe tener entre 10 y 15 dígitos.';
     return;
   }
   try {
-    const data = await apiJson(`/api/tiendas/${encodeURIComponent(tiendaActivaId)}`, {
+    const data = await apiJson(`/api/tiendas/${encodeURIComponent(id)}`, {
       method: 'PUT',
-      body: JSON.stringify({
-        nombre: nombreTiendaActiva(),
-        telefonoConfirmacion,
-      }),
+      body: JSON.stringify({ nombre, telefonoConfirmacion }),
     });
-    if (Array.isArray(data.tiendas) && data.tiendas.length) catalogoTiendas = data.tiendas;
-    cargarTelefonoConfirmacionTiendaEnUI();
-    mostrarToast(`Número de confirmación guardado para ${nombreTiendaActiva()}.`, 'success');
+    aplicarCatalogoTiendasDesdeRespuesta(data);
+    mostrarToast(`Tienda «${nombre}» actualizada.`, 'success');
+  } catch (e) {
+    if (err) err.textContent = String(e.message || e);
+  }
+}
+
+function confirmarEliminarTiendaAdmin(id) {
+  const t = tiendaPorId(id);
+  const nombre = (t && t.nombre) || 'esta tienda';
+  mostrarModalDecision({
+    titulo: 'Eliminar tienda',
+    texto: `¿Eliminar «${nombre}»? Los pedidos de esa tienda dejarán de verse en el listado. Debe quedar al menos una tienda.`,
+    textoConfirmar: 'Eliminar',
+    textoCancelar: 'Cancelar',
+    claseConfirmar: 'btn-danger',
+    mostrarSecundario: false,
+    onConfirmar: () => {
+      void eliminarTiendaAdmin(id);
+    },
+    onCancelar: () => {},
+  });
+}
+
+async function eliminarTiendaAdmin(id) {
+  if (!esSesionAdmin() || !id) return;
+  const err = document.getElementById('configTiendaConfirmacionError');
+  if (err) err.textContent = '';
+  try {
+    const data = await apiJson(`/api/tiendas/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    aplicarCatalogoTiendasDesdeRespuesta(data);
+    mostrarToast('Tienda eliminada.', 'success');
   } catch (e) {
     if (err) err.textContent = String(e.message || e);
   }

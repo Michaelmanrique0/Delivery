@@ -2534,6 +2534,55 @@ html.dark .pedido.cancelado .pedido-numero {
   pointer-events: none;
 }
 
+.lista-tiendas-admin {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tienda-admin-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.tienda-admin-card-campos {
+  display: grid;
+  gap: 8px;
+}
+
+@media (min-width: 640px) {
+  .tienda-admin-card-campos {
+    grid-template-columns: 1.2fr 1fr;
+  }
+}
+
+.tienda-admin-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.tienda-admin-card-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.tienda-admin-card-acciones .btn-primary,
+.tienda-admin-card-acciones .btn-danger {
+  margin: 0;
+}
+
 .lista-tiendas-cambio {
   display: flex;
   flex-direction: column;

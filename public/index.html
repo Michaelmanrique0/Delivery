@@ -11,7 +11,7 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
 <link rel="stylesheet" href="tailwind.css?v=20261106mobfix">
-<link rel="stylesheet" href="style.css?v=20261107xbtn">
+<link rel="stylesheet" href="style.css?v=20261107tiendas">
 <script>
 (function () {
   try {
@@ -348,14 +348,10 @@
     <p class="modal-usuarios-ayuda page-usuarios-roles-intro bento-help">Crea mensajeros u otros administradores y cambia roles cuando lo necesites. En mensajeros puedes permitir o no que confirmen y modifiquen el valor del pedido.</p>
 
     <section id="sectionConfirmacionEntregaTienda" class="medios-pago-tienda-admin rounded-2xl">
-      <h3 class="page-usuarios-asignaciones-titulo"><span data-lucide="message-circle"></span> Confirmación de entrega</h3>
-      <p id="cfgTiendaTelefonoConfirmacionHint" class="config-notificacion-ayuda">Chat de WhatsApp donde se envía el mensaje y la foto al confirmar una entrega de esta tienda.</p>
+      <h3 class="page-usuarios-asignaciones-titulo"><span data-lucide="store"></span> Tiendas</h3>
+      <p class="config-notificacion-ayuda">Puedes cambiar el nombre y el WhatsApp de confirmación de cada tienda, o eliminarla. Debe quedar al menos una.</p>
       <p id="configTiendaConfirmacionError" class="auth-form-error config-notificacion-error" role="alert"></p>
-      <div class="medios-pago-tienda-form configuracion-notificacion-body">
-        <label for="cfgTiendaTelefonoConfirmacion">Número de confirmación (WhatsApp)</label>
-        <input type="text" id="cfgTiendaTelefonoConfirmacion" class="ui-input" inputmode="numeric" maxlength="15" placeholder="Ej: 3213153165" autocomplete="off">
-        <button type="button" class="btn-primary rounded-2xl" onclick="void guardarTelefonoConfirmacionTiendaDesdeUI()">Guardar número de esta tienda</button>
-      </div>
+      <div id="listaTiendasAdmin" class="lista-tiendas-admin"></div>
     </section>
 
     <section id="sectionMediosPagoTienda" class="medios-pago-tienda-admin rounded-2xl">
@@ -447,7 +443,7 @@
 
 <script src="ui/lucide.js?v=20261106bento"></script>
 <script src="ui/theme.js?v=20261106bento"></script>
-<script src="app.js?v=20261107conf" defer></script>
+<script src="app.js?v=20261107tiendas" defer></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {

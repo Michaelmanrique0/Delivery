@@ -1237,6 +1237,13 @@ app.put(
       res.status(400).json({ error: 'El número de confirmación debe tener entre 10 y 15 dígitos.' });
       return;
     }
+    const repetida = catalogo.tiendas.some(
+      (t) => String(t.id) !== id && String(t.nombre).toLowerCase() === nombre.toLowerCase()
+    );
+    if (repetida) {
+      res.status(400).json({ error: 'Ya hay una tienda con ese nombre.' });
+      return;
+    }
     catalogo.tiendas[ix] = serializarTiendaCatalogo({
       ...actual,
       nombre,
@@ -1244,6 +1251,47 @@ app.put(
     });
     await setMeta(TIENDAS_META_KEY, JSON.stringify(catalogo));
     res.json({ ok: true, tienda: catalogo.tiendas[ix], tiendas: catalogo.tiendas });
+  })
+);
+
+app.delete(
+  '/api/tiendas/:id',
+  asyncHandler(authMiddleware),
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const catalogo = await asegurarCatalogoTiendas();
+    const id = String(req.params.id || '').trim();
+    if (!catalogo.tiendas.some((t) => String(t.id) === id)) {
+      res.status(400).json({ error: 'Esa tienda no existe.' });
+      return;
+    }
+    if (catalogo.tiendas.length <= 1) {
+      res.status(400).json({ error: 'Debe quedar al menos una tienda.' });
+      return;
+    }
+    catalogo.tiendas = catalogo.tiendas.filter((t) => String(t.id) !== id);
+    if (!catalogo.tiendas.some((t) => String(t.id) === String(catalogo.defaultId))) {
+      catalogo.defaultId = catalogo.tiendas[0].id;
+    }
+    await setMeta(TIENDAS_META_KEY, JSON.stringify(catalogo));
+    const mapa = await mapaTiendaActivaUsuarios();
+    const fallback = catalogo.defaultId || catalogo.tiendas[0].id;
+    let mapaCambio = false;
+    for (const uid of Object.keys(mapa)) {
+      if (String(mapa[uid]) === id) {
+        mapa[uid] = fallback;
+        mapaCambio = true;
+      }
+    }
+    if (mapaCambio) await setMeta(TIENDA_ACTIVA_META_KEY, JSON.stringify(mapa));
+    const uid = String(req.user.id);
+    let activaId = String(mapa[uid] || fallback);
+    if (!catalogo.tiendas.some((t) => String(t.id) === activaId)) activaId = fallback;
+    res.json({
+      ok: true,
+      tiendas: catalogo.tiendas,
+      tiendaActivaId: activaId,
+    });
   })
 );
 
