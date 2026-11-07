@@ -46,6 +46,7 @@ const {
 const PORT = Number(process.env.PORT || 3847);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-delivery-cambia-esto-en-produccion';
 const SALT_ROUNDS = 10;
+const TIENDA_ID_DEFAULT = 'tienda-principal';
 
 function correoValido(emailNorm) {
   const e = String(emailNorm || '');
@@ -142,6 +143,27 @@ function parsePayloadRow(row) {
   }
 }
 
+function pedidoDesdeFila(row) {
+  const p = parsePayloadRow(row);
+  if (!p) return null;
+  if (!String(p.tiendaId || '').trim()) p.tiendaId = TIENDA_ID_DEFAULT;
+  const rowId = Number(row && row.id);
+  const sid = Number(p.storageId);
+  if (!Number.isFinite(sid) || sid <= 0) {
+    p.storageId = Number.isFinite(rowId) ? rowId : Number(p.id);
+  }
+  return p;
+}
+
+function idAlmacenPedidoServidor(p, row) {
+  const sid = Number(p && p.storageId);
+  if (Number.isFinite(sid) && sid > 0) return sid;
+  const rowId = Number(row && row.id);
+  if (Number.isFinite(rowId) && rowId > 0) return rowId;
+  const id = Number(p && p.id);
+  return Number.isFinite(id) ? id : NaN;
+}
+
 /** Quita asignación de pedidos a un mensajero antes de borrar su cuenta. */
 async function unassignOrdersFromUser(userId) {
   const uid = String(userId);
@@ -216,7 +238,7 @@ async function idsAsignadosMensajero(uid) {
     if (row.id == null) continue;
     const p = parsePayloadRow(row);
     if (!p) continue;
-    if (String(p.assignedTo || '') === String(uid)) mine.add(Number(p.id));
+    if (String(p.assignedTo || '') === String(uid)) mine.add(Number(row.id));
   }
   return mine;
 }
@@ -277,8 +299,8 @@ async function buildOrdersResponseForUser(user, extra = {}) {
   const rows = await getAllOrdersRows();
   const byId = new Map();
   for (const row of rows) {
-    const p = parsePayloadRow(row);
-    if (p && p.id != null) byId.set(Number(p.id), p);
+    const p = pedidoDesdeFila(row);
+    if (p && p.id != null) byId.set(Number(row.id), p);
   }
 
   let orderIndex = [];
@@ -301,8 +323,12 @@ async function buildOrdersResponseForUser(user, extra = {}) {
         seen.add(id);
       }
     }
-    // Solo lo que está en order_index: no reinyectar pedidos viejos que quedaron huérfanos.
-    return { orders: ordered, orderIndex: ordered.map((p) => p.id), ...extra };
+    for (const [id, p] of byId) {
+      if (seen.has(id)) continue;
+      ordered.push(p);
+      seen.add(id);
+    }
+    return { orders: ordered, orderIndex: ordered.map((p) => idAlmacenPedidoServidor(p)), ...extra };
   }
 
   const indexSet = new Set(
@@ -310,15 +336,15 @@ async function buildOrdersResponseForUser(user, extra = {}) {
   );
   const mine = [];
   for (const row of rows) {
-    const p = parsePayloadRow(row);
+    const p = pedidoDesdeFila(row);
     if (!p) continue;
-    const id = Number(p.id);
+    const almacen = Number(row.id);
     if (String(p.assignedTo || '') !== String(user.id)) continue;
     // Si el admin ya lo quitó de la lista, no debe seguir en el repartidor.
-    if (indexSet.size > 0 && !indexSet.has(id)) continue;
+    if (indexSet.size > 0 && !indexSet.has(almacen) && !indexSet.has(Number(p.id))) continue;
     mine.push(p);
   }
-  const byMine = new Map(mine.map((p) => [Number(p.id), p]));
+  const byMine = new Map(mine.map((p) => [idAlmacenPedidoServidor(p), p]));
 
   const routeKey = `route_u${user.id}`;
   let routeIds = [];
@@ -352,7 +378,7 @@ async function buildOrdersResponseForUser(user, extra = {}) {
     }
   }
   for (const p of mine) {
-    const id = Number(p.id);
+    const id = idAlmacenPedidoServidor(p);
     if (!seen.has(id)) ordered.push(p);
   }
 
@@ -366,7 +392,7 @@ async function buildOrdersResponseForUser(user, extra = {}) {
   const routeRevision = await leerRutaRevMensajero(user.id);
   return {
     orders: ordered,
-    orderIndex: ordered.map((p) => p.id),
+    orderIndex: ordered.map((p) => idAlmacenPedidoServidor(p)),
     routeNotice,
     routeRevision,
     ...extra,
@@ -576,6 +602,16 @@ function filtrarDiasPorRetencion(dias, retencionDias) {
 
 const TARIFA_PAGO_MENSAJERO_HISTORIAL = 12000;
 
+function idTiendaDiaHistorial(d) {
+  const id = String((d && d.tiendaId) || '').trim();
+  return id || TIENDA_ID_DEFAULT;
+}
+
+function claveDiaHistorial(d) {
+  if (!d || !d.fecha) return '';
+  return `${d.fecha}::${idTiendaDiaHistorial(d)}`;
+}
+
 function normalizarPedidoHistorialSnap(p) {
   if (!p || typeof p !== 'object') return null;
   const id = Number(p.id);
@@ -584,6 +620,7 @@ function normalizarPedidoHistorialSnap(p) {
   const estadosOk = new Set(['entregado', 'devuelto', 'sin_entregar']);
   const snap = {
     id,
+    tiendaId: String(p.tiendaId || TIENDA_ID_DEFAULT),
     nombre: String(p.nombre || '').trim().slice(0, 120),
     estado: estadosOk.has(estado) ? estado : 'entregado',
     montoNequi: Math.max(0, Number(p.montoNequi) || 0),
@@ -594,6 +631,8 @@ function normalizarPedidoHistorialSnap(p) {
     snap.valor = Math.max(0, Number(p.valor));
   }
   if (p.pagaMensajero != null) snap.pagaMensajero = !!p.pagaMensajero;
+  const sid = Number(p.storageId);
+  if (Number.isFinite(sid) && sid > 0) snap.storageId = sid;
   return snap;
 }
 
@@ -760,6 +799,7 @@ function fusionarDiaConAporteMensajero(prev, incoming, userId, nombreFallback) {
   const totales = prev ? sumarMetricasHistorial(sumarMetricasHistorial(base, oldM, -1), metricas, 1) : metricas;
   return normalizarDiaHistorial({
     fecha: incoming.fecha,
+    tiendaId: incoming.tiendaId,
     ...totales,
     porMensajero,
     actualizadoEn: Math.floor(Date.now() / 1000),
@@ -775,6 +815,7 @@ function normalizarDiaHistorial(d) {
     : [];
   return {
     fecha,
+    tiendaId: idTiendaDiaHistorial(d),
     entregados: Math.max(0, Number(d.entregados) || 0),
     devueltos: Math.max(0, Number(d.devueltos) || 0),
     sinEntregar: Math.max(0, Number(d.sinEntregar) || 0),
@@ -815,11 +856,12 @@ function diaHistorialTieneActividad(d) {
 function fusionarDiasHistorialServidor(actuales, incoming) {
   const map = new Map();
   for (const d of actuales || []) {
-    if (d && d.fecha) map.set(String(d.fecha), d);
+    const key = claveDiaHistorial(d);
+    if (key) map.set(key, d);
   }
   for (const d of incoming || []) {
     if (!d || !d.fecha) continue;
-    const key = String(d.fecha);
+    const key = claveDiaHistorial(d);
     const prev = map.get(key);
     // No pisar un día con datos por uno vacío (p. ej. pedidos ya borrados del dispositivo).
     if (!diaHistorialTieneActividad(d) && prev && diaHistorialTieneActividad(prev)) continue;
@@ -928,7 +970,7 @@ app.post(
     const actuales = parseHistorialDias(await getMeta(HISTORIAL_DIAS_META))
       .map(normalizarDiaHistorial)
       .filter(Boolean);
-    const prev = actuales.find((d) => d.fecha === dia.fecha) || null;
+    const prev = actuales.find((d) => claveDiaHistorial(d) === claveDiaHistorial(dia)) || null;
     let diaGuardado = dia;
     if (req.user && req.user.role === 'mensajero') {
       // No reemplaza el día completo: solo su parte. La retención la define el admin.
@@ -951,7 +993,7 @@ app.post(
       res.json({ ok: true, dia: prev, config: cfg, conservado: true });
       return;
     }
-    const sinEste = actuales.filter((d) => d.fecha !== dia.fecha);
+    const sinEste = actuales.filter((d) => claveDiaHistorial(d) !== claveDiaHistorial(dia));
     diaGuardado.actualizadoEn = Math.floor(Date.now() / 1000);
     const dias = filtrarDiasPorRetencion([...sinEste, diaGuardado], cfg.retencionDias).sort((a, b) =>
       b.fecha.localeCompare(a.fecha)
@@ -1053,7 +1095,7 @@ app.put(
 // --- Tiendas (para quién trabaja el usuario) ---
 const TIENDAS_META_KEY = 'tiendas_v1';
 const TIENDA_ACTIVA_META_KEY = 'usuario_tienda_activa_v1';
-const TIENDA_DEFAULT = { id: 'tienda-principal', nombre: 'Tienda principal' };
+const TIENDA_DEFAULT = { id: TIENDA_ID_DEFAULT, nombre: 'Tienda principal' };
 
 function parseJsonMeta(raw, fallback) {
   try {
@@ -1328,7 +1370,7 @@ app.put(
       return;
     }
     if (!Array.isArray(orderIndex)) {
-      orderIndex = orders.map((p) => p.id);
+      orderIndex = orders.map((p) => idAlmacenPedidoServidor(p));
     }
     await withOrdersWriteLock(async () => {
       const clientRev = Number(req.body?.clientRevision);
@@ -1343,10 +1385,16 @@ app.put(
       }
       const rows = orders
         .filter((p) => p && p.id != null && Number.isFinite(Number(p.id)))
-        .map((p) => ({
-          id: Number(p.id),
-          payload: JSON.stringify(p),
-        }));
+        .map((p) => {
+          if (!String(p.tiendaId || '').trim()) p.tiendaId = TIENDA_ID_DEFAULT;
+          const almacen = idAlmacenPedidoServidor(p);
+          p.storageId = almacen;
+          return {
+            id: almacen,
+            payload: JSON.stringify(p),
+          };
+        })
+        .filter((r) => Number.isFinite(r.id) && r.id > 0);
       await replaceAllOrders(rows);
       const idsVigentes = orderIndex.map((oid) => Number(oid)).filter(Number.isFinite);
       await setMeta('order_index', JSON.stringify(idsVigentes));
@@ -1380,16 +1428,18 @@ app.put(
       return;
     }
     if (!Array.isArray(orderIndex)) {
-      orderIndex = orders.map((p) => p.id);
+      orderIndex = orders.map((p) => idAlmacenPedidoServidor(p));
     }
     const uid = String(req.user.id);
     const existingRows = await getAllOrdersRows();
     const existingIds = new Set(existingRows.map((r) => Number(r.id)));
     for (const p of orders) {
       if (!p || p.id == null) continue;
-      const id = Number(p.id);
+      const id = idAlmacenPedidoServidor(p);
       if (!existingIds.has(id)) continue;
       if (String(p.assignedTo || '') !== uid) continue;
+      if (!String(p.tiendaId || '').trim()) p.tiendaId = TIENDA_ID_DEFAULT;
+      p.storageId = id;
       await upsertOrderRow(id, p);
     }
     const mine = await idsAsignadosMensajero(uid);

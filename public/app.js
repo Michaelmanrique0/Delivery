@@ -86,6 +86,71 @@ function pedidosDeTiendaActiva() {
   return pedidos.filter((p) => idTiendaPedido(p) === tid);
 }
 
+function clavePedido(pedido) {
+  const id = pedido && pedido.id != null ? Number(pedido.id) : NaN;
+  if (!Number.isFinite(id) || id <= 0) return '';
+  return `${idTiendaPedido(pedido)}::${id}`;
+}
+
+function idAlmacenPedido(pedido) {
+  const sid = Number(pedido && pedido.storageId);
+  if (Number.isFinite(sid) && sid > 0) return sid;
+  const id = Number(pedido && pedido.id);
+  return Number.isFinite(id) && id > 0 ? id : 0;
+}
+
+function siguienteIdAlmacen() {
+  let max = 0;
+  for (const p of pedidos) {
+    const n = idAlmacenPedido(p);
+    if (n > max) max = n;
+  }
+  return max + 1;
+}
+
+function asegurarIdsAlmacenPedidos(lista) {
+  const arr = Array.isArray(lista) ? lista : [];
+  const used = new Set();
+  for (const p of arr) {
+    if (!p) continue;
+    let sid = Number(p.storageId);
+    const legacy = Number(p.id);
+    if (!Number.isFinite(sid) || sid <= 0) {
+      if (
+        Number.isFinite(legacy) &&
+        legacy > 0 &&
+        !used.has(legacy) &&
+        idTiendaPedido(p) === TIENDA_DEFAULT_ID
+      ) {
+        sid = legacy;
+      } else {
+        sid = 0;
+      }
+    }
+    if (!sid || used.has(sid)) {
+      sid = 1;
+      while (used.has(sid)) sid += 1;
+    }
+    p.storageId = sid;
+    used.add(sid);
+  }
+  return arr;
+}
+
+function indicePedidoVista(pedidoId) {
+  const n = Number(pedidoId);
+  if (!Number.isFinite(n)) return -1;
+  const tid = String(tiendaActivaId || TIENDA_DEFAULT_ID);
+  const enTienda = pedidos.findIndex((p) => Number(p.id) === n && idTiendaPedido(p) === tid);
+  if (enTienda >= 0) return enTienda;
+  return pedidos.findIndex((p) => Number(p.id) === n);
+}
+
+function pedidoVistaPorId(pedidoId) {
+  const ix = indicePedidoVista(pedidoId);
+  return ix >= 0 ? pedidos[ix] : null;
+}
+
 function nombreTiendaActiva() {
   const t = catalogoTiendas.find((x) => String(x.id) === String(tiendaActivaId));
   return (t && t.nombre) || 'Tienda principal';
@@ -189,6 +254,10 @@ async function confirmarCambioTienda() {
     cerrarModalCambiarTienda();
     renderPedidos();
     actualizarMarcadores();
+    const pageHist = document.getElementById('pageHistorialEntregas');
+    if (pageHist && pageHist.style.display === 'block') {
+      void refrescarHistorialEntregasUI({ omitirCargaConfig: true });
+    }
     mostrarToast(`Ahora trabajas en ${nombreTiendaActiva()}.`, 'success');
   } catch (e) {
     if (err) err.textContent = String(e.message || e);
@@ -594,7 +663,7 @@ function flushSyncPedidosAlSalir() {
     const orders = JSON.parse(JSON.stringify(pedidos || []));
     const body = JSON.stringify({
       orders,
-      orderIndex: orders.map((p) => p.id),
+      orderIndex: orders.map((p) => idAlmacenPedido(p)),
       clientRevision: revEnviada,
     });
     void fetch('/api/orders', {
@@ -698,7 +767,7 @@ async function syncPedidosAlServidor() {
       syncPedidosRepetir = false;
       const revAlEnviar = pedidosLocalRev || cargarPedidosLocalRev();
       const orders = JSON.parse(JSON.stringify(pedidos || []));
-      const orderIndex = orders.map((p) => p.id);
+      const orderIndex = orders.map((p) => idAlmacenPedido(p));
       try {
         if (esSesionAdmin()) {
           await apiJson('/api/orders', {
@@ -762,9 +831,9 @@ async function syncPedidosAlServidor() {
 }
 
 function preservarNotificacionEnCaminoLocal(listaNueva) {
-  const prev = new Map((pedidos || []).map((p) => [Number(p.id), p]));
+  const prev = new Map((pedidos || []).map((p) => [clavePedido(p), p]));
   return (listaNueva || []).map((p) => {
-    const loc = prev.get(Number(p.id));
+    const loc = prev.get(clavePedido(p));
     const esperaEnrutar = pedidoEsperaEnrutarTrasNotificar(p && p.id);
     if (p && p.enCurso && !p.entregado && !p.cancelado) {
       if ((loc && loc.notificadoEnCamino) || esperaEnrutar) {
@@ -815,18 +884,18 @@ function fusionarPedidosMensajeroConservandoOrden(delServidor, conservarObjetosL
   const remotos = deduplicarPedidosPorId(
     (Array.isArray(delServidor) ? delServidor : []).map(normalizarPedidoEnMemoria)
   );
-  const porServidor = new Map(remotos.map((p) => [Number(p.id), p]));
+  const porServidor = new Map(remotos.map((p) => [clavePedido(p), p]));
   const base = Array.isArray(pedidos) && pedidos.length > 0 ? pedidos : [];
   const vistos = new Set();
   const out = [];
   for (const p of base) {
-    const id = Number(p && p.id);
-    if (!Number.isFinite(id) || vistos.has(id) || !porServidor.has(id)) continue;
-    vistos.add(id);
+    const k = clavePedido(p);
+    if (!k || vistos.has(k) || !porServidor.has(k)) continue;
+    vistos.add(k);
     if (conservarObjetosLocales) {
       out.push(normalizarPedidoEnMemoria(p));
     } else {
-      const remoto = porServidor.get(id);
+      const remoto = porServidor.get(k);
       out.push(
         p.notificadoEnCamino && remoto && !remoto.notificadoEnCamino
           ? {
@@ -839,9 +908,9 @@ function fusionarPedidosMensajeroConservandoOrden(delServidor, conservarObjetosL
     }
   }
   for (const p of remotos) {
-    const id = Number(p.id);
-    if (!Number.isFinite(id) || vistos.has(id)) continue;
-    vistos.add(id);
+    const k = clavePedido(p);
+    if (!k || vistos.has(k)) continue;
+    vistos.add(k);
     out.push(p);
   }
   return out.map(alinearNotificacionSiSiguePendiente);
@@ -1478,26 +1547,25 @@ function guardarCachePedidos() {
   }
 }
 
-/** Quita duplicados por id conservando el orden del array (datos: gana la última aparición de cada id). */
+/** Quita duplicados por tienda + número, conservando el orden (gana la última aparición). */
 function deduplicarPedidosPorId(lista) {
   const arr = Array.isArray(lista) ? lista : [];
   const map = new Map();
   arr.forEach((p) => {
-    const id = p && p.id != null ? Number(p.id) : null;
-    if (!id || !Number.isFinite(id)) return;
-    map.set(id, p);
+    const k = clavePedido(p);
+    if (!k) return;
+    map.set(k, p);
   });
   const seen = new Set();
   const out = [];
   arr.forEach((p) => {
-    const id = p && p.id != null ? Number(p.id) : null;
-    if (!id || !Number.isFinite(id)) return;
-    if (seen.has(id)) return;
-    seen.add(id);
-    const ultimo = map.get(id);
+    const k = clavePedido(p);
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    const ultimo = map.get(k);
     if (ultimo) out.push(ultimo);
   });
-  return out;
+  return asegurarIdsAlmacenPedidos(out);
 }
 
 function actualizarVisibilidadConfigNotificacion() {
@@ -2232,6 +2300,7 @@ function seleccionarTelefonoConModal(tels, titulo, onElegir) {
 function pedidoNuevoBase() {
   return {
     tiendaId: String(tiendaActivaId || TIENDA_DEFAULT_ID),
+    storageId: siguienteIdAlmacen(),
     assignedTo: null,
     createdBy: null,
     enCurso: false,
@@ -2396,10 +2465,12 @@ function elegirUrlMapsParaBloque(textoCompletoLimpio, bloque, indiceBloque, urls
 }
 
 function generarPedidoId(numeroPedido) {
+  const tid = String(tiendaActivaId || TIENDA_DEFAULT_ID);
+  const deTienda = pedidos.filter((p) => idTiendaPedido(p) === tid);
   const n = Number(numeroPedido);
-  const ocupado = (id) => pedidos.some((p) => Number(p.id) === Number(id));
-  if (Number.isFinite(n) && n > 0 && !ocupado(n)) return n;
-  return Math.max(...pedidos.map((p) => Number(p.id) || 0), 0) + 1;
+  const ocupadoEnTienda = (id) => deTienda.some((p) => Number(p.id) === Number(id));
+  if (Number.isFinite(n) && n > 0 && !ocupadoEnTienda(n)) return n;
+  return Math.max(0, ...deTienda.map((p) => Number(p.id) || 0)) + 1;
 }
 
 /**
@@ -3303,8 +3374,8 @@ function renderPanelLinksMapsPendientes() {
   if (!panel || !host) return;
 
   const UMBRAL_COORDS_MUY_PEGADAS_M = 30;
-  const idsPegadas = idsPedidosConCoordsMuyPegadas(pedidos, UMBRAL_COORDS_MUY_PEGADAS_M);
-  const pendientes = pedidos.filter((p) => pedidoNecesitaCorregirLinkMaps(p, { idsPegadas }));
+  const idsPegadas = idsPedidosConCoordsMuyPegadas(pedidosDeTiendaActiva(), UMBRAL_COORDS_MUY_PEGADAS_M);
+  const pendientes = pedidosDeTiendaActiva().filter((p) => pedidoNecesitaCorregirLinkMaps(p, { idsPegadas }));
   if (!pendientes.length) {
     panel.style.display = 'none';
     host.innerHTML = '';
@@ -3339,7 +3410,7 @@ function renderPanelLinksMapsPendientes() {
 }
 
 function abrirLinkMapsPendiente(pedidoId) {
-  const p = pedidos.find((x) => Number(x.id) === Number(pedidoId));
+  const p = pedidoVistaPorId(pedidoId);
   if (!p) return;
   const url = String(p.mapUrl || '').trim();
   if (!url) return;
@@ -3347,7 +3418,7 @@ function abrirLinkMapsPendiente(pedidoId) {
 }
 
 async function aplicarLinkMapsPendiente(pedidoId) {
-  const p = pedidos.find((x) => Number(x.id) === Number(pedidoId));
+  const p = pedidoVistaPorId(pedidoId);
   if (!p) return;
   const input = document.getElementById(`mapFixInput_${Number(pedidoId)}`);
   const nuevaUrl = input ? String(input.value || '').trim() : '';
@@ -3603,7 +3674,9 @@ async function asignarPedidoDesdeSelect(selectEl) {
   await mostrarLoadingYEsperarPintado(mensajeCarga);
   try {
     if (hayPedidosSyncPendiente()) await forzarSyncPedidosAhora();
-    await apiJson(`/api/orders/${pedidoId}/assign`, {
+    const pedidoLocal = pedidos.find((p) => idAlmacenPedido(p) === pedidoId) || pedidoVistaPorId(pedidoId);
+    const idAlmacen = pedidoLocal ? idAlmacenPedido(pedidoLocal) : pedidoId;
+    await apiJson(`/api/orders/${idAlmacen}/assign`, {
       method: 'PATCH',
       body: JSON.stringify({ userId }),
     });
@@ -3631,7 +3704,9 @@ async function asignarActivosBulkDesdeBarra() {
     mostrarToast('Elige un mensajero en la lista.', 'warning');
     return;
   }
-  const orderIds = pedidos.filter((p) => !p.entregado && !p.cancelado).map((p) => p.id);
+  const orderIds = pedidosDeTiendaActiva()
+    .filter((p) => !p.entregado && !p.cancelado)
+    .map((p) => idAlmacenPedido(p));
   if (orderIds.length === 0) {
     mostrarToast('No hay pedidos activos para asignar.', 'info');
     return;
@@ -3809,7 +3884,7 @@ function crearTarjetaPedido(pedido, index) {
     </div>
     ${
       adminUi
-        ? `<div class="pedido-asignacion"><label class="pedido-asignacion-label" for="asignSel_${pedido.id}">${uiIcon('bike')} Asignar a mensajero</label><select id="asignSel_${pedido.id}" class="pedido-asignacion-select" data-asign-pedido-id="${pedido.id}" data-prev-value="${escapeHtmlAttr(String(pedido.assignedTo || ''))}" onchange="asignarPedidoDesdeSelect(this)">${htmlOpcionesMensajerosSelect(pedido)}</select></div>`
+        ? `<div class="pedido-asignacion"><label class="pedido-asignacion-label" for="asignSel_${idAlmacenPedido(pedido)}">${uiIcon('bike')} Asignar a mensajero</label><select id="asignSel_${idAlmacenPedido(pedido)}" class="pedido-asignacion-select" data-asign-pedido-id="${idAlmacenPedido(pedido)}" data-prev-value="${escapeHtmlAttr(String(pedido.assignedTo || ''))}" onchange="asignarPedidoDesdeSelect(this)">${htmlOpcionesMensajerosSelect(pedido)}</select></div>`
         : ''
     }
     ${bloqueHerramientasPedidoHtml}
@@ -3888,7 +3963,7 @@ function renderListaOrdenEntrega() {
     acciones.appendChild(mkBtn(1, '▼', 'Bajar en la ruta'));
 
     if (pedido.enCurso && !pedido.entregado && !pedido.cancelado) {
-      const idxGlobal = pedidos.findIndex((p) => Number(p.id) === Number(pedido.id));
+      const idxGlobal = indicePedidoVista(pedido.id);
       if (idxGlobal >= 0) {
         const bPend = document.createElement('button');
         bPend.type = 'button';
@@ -3924,8 +3999,8 @@ function renderListaOrdenEntrega() {
 
 /** Mueve un pedido activo una posición arriba/abajo en la lista de ruta (mismo criterio que el panel lateral). */
 function moverPedidoUnPasoEnOrdenActiva(pedidoId, delta) {
-  const activos = pedidos.filter((p) => !p.entregado && !p.cancelado);
-  const i = activos.findIndex((p) => p.id === pedidoId);
+  const activos = pedidosDeTiendaActiva().filter((p) => !p.entregado && !p.cancelado);
+  const i = activos.findIndex((p) => Number(p.id) === Number(pedidoId));
   if (i < 0) return;
   const j = i + delta;
   if (j < 0 || j >= activos.length) return;
@@ -3947,10 +4022,10 @@ function moverPedidoUnPasoEnOrdenActiva(pedidoId, delta) {
 function idsRutaActivaMensajeroDesdeOrdenActual(uid) {
   const key = String(uid || '').trim();
   if (!key) return [];
-  return pedidos
+  return pedidosDeTiendaActiva()
     .filter((p) => !p.cancelado && !p.entregado && String(p.assignedTo || '').trim() === key)
-    .map((p) => Number(p.id))
-    .filter(Number.isFinite);
+    .map((p) => idAlmacenPedido(p))
+    .filter((id) => Number.isFinite(id) && id > 0);
 }
 
 async function notificarMensajerosOrdenActualizado() {
@@ -3982,8 +4057,8 @@ async function notificarMensajerosOrdenActualizado() {
 }
 
 function moverPedidoPorId(draggedId, targetId) {
-  const draggedIndex = pedidos.findIndex((p) => Number(p.id) === Number(draggedId));
-  const targetIndex = pedidos.findIndex((p) => Number(p.id) === Number(targetId));
+  const draggedIndex = indicePedidoVista(draggedId);
+  const targetIndex = indicePedidoVista(targetId);
   if (draggedIndex < 0 || targetIndex < 0 || draggedIndex === targetIndex) return false;
 
   const [removed] = pedidos.splice(draggedIndex, 1);
@@ -4010,7 +4085,7 @@ async function advertirSiAdminReordenaAsignados(idsPedidos) {
   if (!esSesionAdmin()) return true;
   const uids = new Set();
   for (const pid of idsPedidos) {
-    const p = pedidos.find((x) => Number(x.id) === Number(pid));
+    const p = pedidoVistaPorId(pid);
     const a = String(p?.assignedTo || '').trim();
     if (a) uids.add(a);
   }
@@ -4032,10 +4107,10 @@ async function advertirSiAdminReordenaAsignados(idsPedidos) {
 /** Inserta el pedido inmediatamente antes de `beforeId` (tras quitar el arrastrado del array). */
 function moverPedidoAntesDeId(draggedId, beforeId) {
   if (Number(draggedId) === Number(beforeId)) return false;
-  const draggedIndex = pedidos.findIndex((p) => Number(p.id) === Number(draggedId));
+  const draggedIndex = indicePedidoVista(draggedId);
   if (draggedIndex < 0) return false;
   const [removed] = pedidos.splice(draggedIndex, 1);
-  const insertAt = pedidos.findIndex((p) => Number(p.id) === Number(beforeId));
+  const insertAt = indicePedidoVista(beforeId);
   if (insertAt < 0) {
     pedidos.splice(draggedIndex, 0, removed);
     return false;
@@ -4047,10 +4122,10 @@ function moverPedidoAntesDeId(draggedId, beforeId) {
 /** Inserta el pedido inmediatamente después de `afterId` (tras quitar el arrastrado del array). */
 function moverPedidoDespuesDeId(draggedId, afterId) {
   if (Number(draggedId) === Number(afterId)) return false;
-  const draggedIndex = pedidos.findIndex((p) => Number(p.id) === Number(draggedId));
+  const draggedIndex = indicePedidoVista(draggedId);
   if (draggedIndex < 0) return false;
   const [removed] = pedidos.splice(draggedIndex, 1);
-  let insertAt = pedidos.findIndex((p) => Number(p.id) === Number(afterId));
+  let insertAt = indicePedidoVista(afterId);
   if (insertAt < 0) {
     pedidos.splice(draggedIndex, 0, removed);
     return false;
@@ -4701,7 +4776,10 @@ function guardarEdicionPedido() {
       return;
     }
     if (nuevoId !== idActual) {
-      const repetido = pedidos.some((p, i) => i !== index && Number(p.id) === nuevoId);
+      const tid = idTiendaPedido(pedido);
+      const repetido = pedidos.some(
+        (p, i) => i !== index && Number(p.id) === nuevoId && idTiendaPedido(p) === tid
+      );
       if (repetido) {
         mostrarAvisoEnApp(
           `El número #${nuevoId} está repetido: ya hay otro pedido con ese número.\n\nSi quieres cambiar a #${nuevoId}, es necesario eliminar el otro pedido o cambiarle el número.\n\nEl número de este pedido no se cambió.`,
@@ -7515,7 +7593,7 @@ function aplicarSeparacionVisualMarcadores() {
       const newLng = centroLng + dLng;
       const { item } = datos[idx];
       const pedidoId = item.pedidoId;
-      const p = pedidos.find((x) => Number(x.id) === Number(pedidoId));
+      const p = pedidoVistaPorId(pedidoId);
       const prods = p?.productos || [];
       mapa.removeLayer(item.marker);
       const estadoVisual = obtenerEstadoVisualPedido(Number(pedidoId));
@@ -7635,7 +7713,7 @@ function actualizarMarcadores(opciones) {
 
 function obtenerEstadoVisualPedido(pedidoId) {
   const idNum = Number(pedidoId);
-  const pedido = pedidos.find((p) => Number(p.id) === idNum);
+  const pedido = pedidoVistaPorId(idNum);
   if (!pedido) return 'pendiente';
   if (pedido.entregado) return 'entregado';
   if (pedido.enCurso) return 'enCurso';
@@ -8136,6 +8214,8 @@ function pedidoAObjetoCompacto(p) {
   if (p.esDevolucionCliente) o.dv = 1;
   if (Number(p.montoDevolucion)) o.mdv = Number(p.montoDevolucion);
   if (p.metodoDevolucion) o.mtv = p.metodoDevolucion;
+  if (p.tiendaId) o.td = p.tiendaId;
+  if (Number(p.storageId) > 0) o.sid = Number(p.storageId);
   return o;
 }
 
@@ -8170,6 +8250,8 @@ function pedidoDesdeObjetoCompacto(c) {
     esDevolucionCliente: !!c.dv,
     montoDevolucion: Number(c.mdv ?? 0),
     metodoDevolucion: c.mtv || '',
+    tiendaId: c.td || undefined,
+    storageId: Number(c.sid) > 0 ? Number(c.sid) : undefined,
   };
   if (Array.isArray(c.c) && c.c.length >= 2) {
     plain.coords = { lat: Number(c.c[0]), lng: Number(c.c[1]) };
@@ -8344,6 +8426,8 @@ function pedidoDesdeObjetoImport(o) {
   const merged = {
     ...pedidoNuevoBase(),
     id,
+    tiendaId: String(o.tiendaId || o.tienda_id || TIENDA_DEFAULT_ID),
+    storageId: Number(o.storageId || o.storage_id) > 0 ? Number(o.storageId || o.storage_id) : undefined,
     assignedTo: o.assignedTo != null ? normalizarUuidAsignacion(o.assignedTo) : (o.assigned_to ? normalizarUuidAsignacion(o.assigned_to) : null),
     createdBy: o.createdBy ?? o.created_by ?? null,
     nombre: o.nombre || '',
@@ -8393,8 +8477,8 @@ function aplicarImportacionPedidosDesdeLista(lista, reemplazar) {
   if (reemplazar) {
     pedidos = incoming;
   } else {
-    const byId = new Map(pedidos.map((p) => [Number(p.id), p]));
-    incoming.forEach((p) => byId.set(Number(p.id), p));
+    const byId = new Map(pedidos.map((p) => [clavePedido(p), p]));
+    incoming.forEach((p) => byId.set(clavePedido(p), p));
     pedidos = deduplicarPedidosPorId(Array.from(byId.values()));
   }
   if (pedidos.length > 0) {
@@ -9157,7 +9241,7 @@ function etiquetaEstadoPedidoResumida(p) {
 
 function pedidosAsignadosAMensajero(userId) {
   const key = String(userId ?? '');
-  return pedidos.filter((p) => String(p.assignedTo || '') === key);
+  return pedidosDeTiendaActiva().filter((p) => String(p.assignedTo || '') === key);
 }
 
 function htmlPedidosAsignadosLista(asignados) {
@@ -9204,7 +9288,7 @@ function renderPanelAsignacionesMensajeros() {
       return;
     }
     const porAsignado = new Map();
-    for (const p of pedidos) {
+    for (const p of pedidosDeTiendaActiva()) {
       const k = uidPedidoAsignado(p);
       if (!porAsignado.has(k)) porAsignado.set(k, []);
       porAsignado.get(k).push(p);
@@ -9231,19 +9315,19 @@ function renderPanelAsignacionesMensajeros() {
     chunks.push(htmlCardPedidosYPagosMensajero(titulo, asignados));
   }
 
-  const sinAsignar = pedidos.filter((p) => uidPedidoAsignado(p) === '');
+  const sinAsignar = pedidosDeTiendaActiva().filter((p) => uidPedidoAsignado(p) === '');
   if (sinAsignar.length) {
     chunks.push(htmlCardPedidosYPagosMensajero('Sin asignar', sinAsignar));
   }
 
   const idsEnLista = new Set(listaMensajerosCache.map((x) => String(x.id)));
   const idsOrfanos = new Set();
-  for (const p of pedidos) {
+  for (const p of pedidosDeTiendaActiva()) {
     const a = uidPedidoAsignado(p);
     if (a && !idsEnLista.has(a)) idsOrfanos.add(a);
   }
   for (const orphanId of [...idsOrfanos].sort((x, y) => x.localeCompare(y, undefined, { numeric: true }))) {
-    const subset = pedidos.filter((p) => uidPedidoAsignado(p) === orphanId);
+    const subset = pedidosDeTiendaActiva().filter((p) => uidPedidoAsignado(p) === orphanId);
     chunks.push(htmlCardPedidosYPagosMensajero(`Mensajero (id ${orphanId})`, subset));
   }
 
@@ -9596,8 +9680,11 @@ function etiquetaEstadoHistorial(estado) {
   return 'Entregado';
 }
 
-function resumenHistorialDesdePedidosPorFecha(fecha) {
-  const delDia = pedidos.filter((p) => p && String(p.fechaOperacion || '') === String(fecha));
+function resumenHistorialDesdePedidosPorFecha(fecha, tiendaId) {
+  const tid = String(tiendaId || tiendaActivaId || TIENDA_DEFAULT_ID);
+  const delDia = pedidos.filter(
+    (p) => p && String(p.fechaOperacion || '') === String(fecha) && idTiendaPedido(p) === tid
+  );
   const entregadosLista = delDia.filter(
     (p) => p.entregado && !p.noEntregado && !p.cancelado && !p.esDevolucionCliente
   );
@@ -9640,6 +9727,8 @@ function resumenHistorialDesdePedidosPorFecha(fecha) {
     if (estado === 'entregado') bucket.entregados += 1;
     bucket.pedidos.push({
       id: Number(p.id),
+      storageId: idAlmacenPedido(p),
+      tiendaId: idTiendaPedido(p),
       nombre: String(p.nombre || '').trim(),
       estado,
       montoNequi: Number(p.montoNequi || 0),
@@ -9662,6 +9751,7 @@ function resumenHistorialDesdePedidosPorFecha(fecha) {
 
   return {
     fecha: String(fecha),
+    tiendaId: tid,
     entregados: entregadosLista.length,
     devueltos: devueltosLista.length,
     sinEntregar: sinEntregarLista.length,
@@ -9793,22 +9883,39 @@ function diaHistorialTieneDatos(d) {
   );
 }
 
+function idTiendaDiaHistorial(d) {
+  return String((d && d.tiendaId) || TIENDA_DEFAULT_ID);
+}
+
+function claveDiaHistorial(d) {
+  if (!d || !d.fecha) return '';
+  return `${d.fecha}::${idTiendaDiaHistorial(d)}`;
+}
+
+function claveSnapHistorial(p) {
+  if (!p || p.id == null) return '';
+  const tid = String(p.tiendaId || TIENDA_DEFAULT_ID);
+  return `${tid}::${Number(p.id)}`;
+}
+
 function fusionarHistorialVisibleMensajero(servidor, local) {
   const uid = sesionUsuario && sesionUsuario.id != null ? String(sesionUsuario.id) : '';
   const nombre = (sesionUsuario && sesionUsuario.username) || 'Tus entregas';
   const map = new Map();
   for (const d of servidor || []) {
-    if (d && d.fecha) map.set(String(d.fecha), d);
+    const key = claveDiaHistorial(d);
+    if (key) map.set(key, d);
   }
   for (const d of local || []) {
     if (!d || !d.fecha || !diaHistorialTieneDatos(d)) continue;
-    const key = String(d.fecha);
+    const key = claveDiaHistorial(d);
     const prev = map.get(key);
     const pedidosLocal = (d.porMensajero || []).flatMap((m) => m.pedidos || []);
     if (!prev) {
       const metricas = metricasDesdePedidosHistorialCliente(pedidosLocal);
       map.set(key, {
         ...d,
+        tiendaId: idTiendaDiaHistorial(d),
         ...metricas,
         porMensajero: [
           {
@@ -9824,15 +9931,18 @@ function fusionarHistorialVisibleMensajero(servidor, local) {
     }
     const porId = new Map();
     for (const p of (prev.porMensajero || []).flatMap((m) => m.pedidos || [])) {
-      if (p && p.id != null) porId.set(Number(p.id), p);
+      const k = claveSnapHistorial(p);
+      if (k) porId.set(k, p);
     }
     for (const p of pedidosLocal) {
-      if (p && p.id != null) porId.set(Number(p.id), p);
+      const k = claveSnapHistorial(p);
+      if (k) porId.set(k, p);
     }
     const pedidos = [...porId.values()];
     const metricas = metricasDesdePedidosHistorialCliente(pedidos);
     map.set(key, {
-      fecha: key,
+      fecha: d.fecha,
+      tiendaId: idTiendaDiaHistorial(d),
       ...metricas,
       porMensajero: [
         {
@@ -9854,34 +9964,39 @@ function fusionarHistorialVisibleMensajero(servidor, local) {
 function fusionarHistorialDias(guardados, desdePedidos) {
   const map = new Map();
   for (const d of guardados || []) {
-    if (d && d.fecha) map.set(String(d.fecha), { ...d });
+    const key = claveDiaHistorial(d);
+    if (key) map.set(key, { ...d, tiendaId: idTiendaDiaHistorial(d) });
   }
   for (const d of desdePedidos || []) {
     if (!d || !d.fecha) continue;
-    const key = String(d.fecha);
+    const key = claveDiaHistorial(d);
     const prev = map.get(key);
     // No reemplazar un día guardado con datos por un resumen vacío.
     if (!diaHistorialTieneDatos(d) && prev && diaHistorialTieneDatos(prev)) continue;
-    map.set(key, { ...d });
+    map.set(key, { ...d, tiendaId: idTiendaDiaHistorial(d) });
   }
   return [...map.values()]
     .filter(diaHistorialTieneDatos)
     .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
 }
 
-function fechasOperacionPresentesEnPedidos() {
-  const set = new Set();
-  for (const p of pedidos) {
-    if (p && p.fechaOperacion) set.add(String(p.fechaOperacion));
-  }
-  return [...set];
-}
-
 function reconstruirHistorialDesdePedidosActuales() {
-  return fechasOperacionPresentesEnPedidos().map((f) => resumenHistorialDesdePedidosPorFecha(f));
+  const vistos = new Set();
+  const out = [];
+  for (const p of pedidos) {
+    if (!p || !p.fechaOperacion) continue;
+    const fecha = String(p.fechaOperacion);
+    const tid = idTiendaPedido(p);
+    const key = `${fecha}::${tid}`;
+    if (vistos.has(key)) continue;
+    vistos.add(key);
+    out.push(resumenHistorialDesdePedidosPorFecha(fecha, tid));
+  }
+  return out;
 }
 
-async function sincronizarHistorialPorFecha(fecha) {
+async function sincronizarHistorialPorFecha(fecha, tiendaId) {
+  const tid = String(tiendaId || tiendaActivaId || TIENDA_DEFAULT_ID);
   if (!fecha || !appEstaOnline() || !getAuthToken()) {
     const local = filtrarDiasHistorialPorRetencion(
       fusionarHistorialDias(
@@ -9893,7 +10008,7 @@ async function sincronizarHistorialPorFecha(fecha) {
     guardarHistorialEntregasCacheLocal(local);
     return;
   }
-  const dia = resumenHistorialDesdePedidosPorFecha(fecha);
+  const dia = resumenHistorialDesdePedidosPorFecha(fecha, tid);
   try {
     await apiJson('/api/historial-entregas/dia', {
       method: 'POST',
@@ -9920,12 +10035,12 @@ async function sincronizarHistorialPorFecha(fecha) {
 async function sincronizarHistorialDiaPedido(pedido) {
   if (!pedido) return;
   sellarFechaOperacionPedido(pedido);
-  await sincronizarHistorialPorFecha(pedido.fechaOperacion);
+  await sincronizarHistorialPorFecha(pedido.fechaOperacion, idTiendaPedido(pedido));
 }
 
 /** True si aún hay pedidos por entregar (pendientes o en ruta). */
 function quedanPedidosActivosPorEntregar() {
-  return pedidos.some((p) => p && !p.entregado && !p.cancelado);
+  return pedidosDeTiendaActiva().some((p) => p && !p.entregado && !p.cancelado);
 }
 
 /**
@@ -10225,13 +10340,15 @@ async function refrescarHistorialEntregasUI(opts) {
       6000
     );
   }
-  if (fusion.length === 0) {
+  const tidVista = String(tiendaActivaId || TIENDA_DEFAULT_ID);
+  const fusionTienda = fusion.filter((d) => idTiendaDiaHistorial(d) === tidVista);
+  if (fusionTienda.length === 0) {
     host.innerHTML = vistaMensajero
-      ? '<p class="historial-entregas-vacio">Aún no tienes días en el historial. Cuando cierres una entrega, aparecerá aquí durante el tiempo que definió el administrador.</p>'
-      : '<p class="historial-entregas-vacio">Aún no hay días registrados. Solo entran pedidos ya entregados, devueltos o sin entregar (no los pendientes ni en ruta). Al finalizar uno, aparecerá aquí.</p>';
+      ? '<p class="historial-entregas-vacio">Aún no tienes días en el historial de esta tienda. Cuando cierres una entrega, aparecerá aquí durante el tiempo que definió el administrador.</p>'
+      : '<p class="historial-entregas-vacio">Aún no hay días registrados en esta tienda. Solo entran pedidos ya entregados, devueltos o sin entregar (no los pendientes ni en ruta). Al finalizar uno, aparecerá aquí.</p>';
     return;
   }
-  host.innerHTML = fusion
+  host.innerHTML = fusionTienda
     .map((d) => (vistaMensajero ? htmlTarjetaHistorialDiaPropio(d) : htmlTarjetaHistorialDia(d)))
     .join('');
 }
