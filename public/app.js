@@ -157,10 +157,13 @@ async function crearTiendaDesdeUI() {
       body: JSON.stringify({ nombre }),
     });
     catalogoTiendas = Array.isArray(data.tiendas) ? data.tiendas : catalogoTiendas;
-    if (data.tienda && data.tienda.id) tiendaActivaId = data.tienda.id;
+    tiendaActivaId = String(data.tiendaActivaId || data.tienda?.id || tiendaActivaId);
+    actualizarTextoCabeceraUsuario();
     if (input) input.value = '';
     pintarListaTiendasCambio();
-    mostrarToast('Tienda creada.', 'success');
+    renderPedidos();
+    actualizarMarcadores();
+    mostrarToast(`Tienda creada. Ahora trabajas en ${nombreTiendaActiva()}.`, 'success');
   } catch (e) {
     if (err) err.textContent = String(e.message || e);
   }
@@ -2393,10 +2396,10 @@ function elegirUrlMapsParaBloque(textoCompletoLimpio, bloque, indiceBloque, urls
 }
 
 function generarPedidoId(numeroPedido) {
-  if (numeroPedido && !pedidos.some(p => p.id === numeroPedido)) {
-    return numeroPedido;
-  }
-  return Math.max(...pedidos.map(p => p.id), 0) + 1;
+  const n = Number(numeroPedido);
+  const ocupado = (id) => pedidos.some((p) => Number(p.id) === Number(id));
+  if (Number.isFinite(n) && n > 0 && !ocupado(n)) return n;
+  return Math.max(...pedidos.map((p) => Number(p.id) || 0), 0) + 1;
 }
 
 /**
@@ -2777,9 +2780,12 @@ async function procesarPedido() {
     );
   }
 
+  const tidActiva = String(tiendaActivaId || TIENDA_DEFAULT_ID);
   const idxExistente =
     numeroPedido != null
-      ? pedidos.findIndex((p) => Number(p.id) === Number(numeroPedido))
+      ? pedidos.findIndex(
+          (p) => Number(p.id) === Number(numeroPedido) && idTiendaPedido(p) === tidActiva
+        )
       : -1;
   const pedidoId = idxExistente >= 0 ? Number(numeroPedido) : generarPedidoId(numeroPedido);
   const mapUrlFinal = coords && coords.lat && coords.lng
@@ -2834,22 +2840,19 @@ async function procesarPedido() {
   const pedidoAviso = pedidos.find((p) => Number(p.id) === Number(pedidoFinalId));
   if (pedidoAviso && pedidoAviso.avisoTelefono) scrollToTopApp();
 
-  setTimeout(() => {
-    if (!mapa) return;
-    if (!coords) return;
-    procesarURLMapaPedido(mapUrlFinal, pedidoFinalId, productosLimpios, () => {
-      ajustarVistaMapa();
-      dibujarRutaEntreMarcadores();
-    });
-  }, 500);
+  setTimeout(() => actualizarMarcadores(), 500);
 
   document.getElementById("textoPedido").value = "";
   const prodTxt = productosLimpios.length ? productosLimpios.join(' · ') : '(sin producto)';
   const valorTxt = Number(valorLimpio || 0).toLocaleString('es-CO');
+  const extraNumero =
+    idxExistente < 0 && numeroPedido != null && Number(pedidoFinalId) !== Number(numeroPedido)
+      ? ` El #${numeroPedido} ya existía en otra tienda; se guardó como #${pedidoFinalId}.`
+      : '';
   mostrarToast(
-    `Pedido #${pedidoFinalId} ${idxExistente >= 0 ? 'actualizado' : 'agregado'}. Productos: ${prodTxt}. Valor: $${valorTxt}`,
+    `Pedido #${pedidoFinalId} ${idxExistente >= 0 ? 'actualizado' : 'agregado'}. Productos: ${prodTxt}. Valor: $${valorTxt}.${extraNumero}`,
     'success',
-    9000
+    extraNumero ? 12000 : 9000
   );
   } finally {
     setAppLoadingVisible(false);
@@ -7713,7 +7716,7 @@ function dibujarRutaEntreMarcadores() {
   };
 
   const coordenadas = [];
-  for (const p of pedidos) {
+  for (const p of pedidosDeTiendaActiva()) {
     if (p.cancelado) continue;
     let lat = null;
     let lng = null;
@@ -7886,6 +7889,7 @@ function normalizarPedidoEnMemoria(p) {
     p.assignedTo = normalizarUuidAsignacion(p.assignedTo);
   }
   if (!p.hasOwnProperty('createdBy')) p.createdBy = null;
+  if (!String(p.tiendaId || '').trim()) p.tiendaId = TIENDA_DEFAULT_ID;
   if (!Array.isArray(p.productos)) p.productos = [];
   p.productos = lineasProductosPedidoNormalizadas(p);
   if (!p.hasOwnProperty('mapUrl')) p.mapUrl = '';

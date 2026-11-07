@@ -1127,7 +1127,15 @@ app.post(
     const id = `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     catalogo.tiendas.push({ id, nombre });
     await setMeta(TIENDAS_META_KEY, JSON.stringify(catalogo));
-    res.status(201).json({ ok: true, tienda: { id, nombre }, tiendas: catalogo.tiendas });
+    const mapa = await mapaTiendaActivaUsuarios();
+    mapa[String(req.user.id)] = id;
+    await setMeta(TIENDA_ACTIVA_META_KEY, JSON.stringify(mapa));
+    res.status(201).json({
+      ok: true,
+      tienda: { id, nombre },
+      tiendas: catalogo.tiendas,
+      tiendaActivaId: id,
+    });
   })
 );
 
