@@ -359,6 +359,10 @@ h3 .icon-ui {
   justify-content: center;
 }
 
+button.fab-app-btn[data-lucide] {
+  display: grid;
+}
+
 #listaPedidos {
   position: relative;
   min-height: 200px;
@@ -1871,24 +1875,21 @@ h3 .icon-ui {
   }
 }
 
-/* Botones flotantes: inicio y mapa, centrados abajo */
+/* Botones flotantes: inicio y mapa */
 .fab-navegacion-app {
   position: fixed;
   z-index: 8000;
-  left: 50%;
-  right: auto;
+  left: max(12px, env(safe-area-inset-left, 0px));
   bottom: max(20px, env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
   gap: 12px;
   pointer-events: none;
 }
 
 .fab-navegacion-app .fab-app-btn {
   pointer-events: auto;
+  box-sizing: border-box;
   width: 52px;
   height: 52px;
   min-width: 52px;
@@ -1897,13 +1898,13 @@ h3 .icon-ui {
   margin: 0;
   border: none;
   border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
+  place-content: center;
   flex-shrink: 0;
-  font-size: 20px;
+  font-size: 0;
   font-weight: 400;
-  line-height: 1;
+  line-height: 0;
   cursor: pointer;
   color: #fff;
   background: var(--triad-a);
@@ -1911,20 +1912,17 @@ h3 .icon-ui {
   transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
 
-.fab-navegacion-app .fab-app-btn i,
+.fab-navegacion-app .fab-app-btn svg,
 .fab-navegacion-app .fab-app-btn .icon-ui,
 .fab-navegacion-app .fab-app-btn [data-lucide] {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   width: 22px;
   height: 22px;
-  margin: 0;
+  margin: 0 !important;
   padding: 0;
-  font-size: 22px;
-  font-weight: 400;
-  line-height: 1;
-  flex-shrink: 0;
+  vertical-align: 0;
+  flex: none;
+  line-height: 0;
 }
 
 .fab-navegacion-app .fab-app-btn i::before {
