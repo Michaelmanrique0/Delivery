@@ -2592,6 +2592,19 @@ html.dark .pedido.cancelado .pedido-numero {
   overflow: auto;
 }
 
+.lista-tiendas-cambio--admin {
+  max-height: min(55vh, 420px);
+  gap: 12px;
+}
+
+.tienda-opcion-radio--en-ficha {
+  margin-bottom: 4px;
+}
+
+#modalDecision.modal-no-entregado-backdrop {
+  z-index: 11000;
+}
+
 .tienda-opcion-radio {
   display: flex;
   align-items: center;

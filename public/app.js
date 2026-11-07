@@ -174,38 +174,8 @@ function cargarTelefonoConfirmacionTiendaEnUI() {
 function pintarListaTiendasAdmin() {
   const host = document.getElementById('listaTiendasAdmin');
   if (!host) return;
-  const puedeBorrar = catalogoTiendas.length > 1;
-  host.innerHTML = catalogoTiendas
-    .map((t) => {
-      const id = String(t.id);
-      const tel = String(t.telefonoConfirmacion || '').replace(/\D/g, '');
-      const activa = id === String(tiendaActivaId);
-      return (
-        `<article class="tienda-admin-card" data-tienda-id="${escapeHtmlAttr(id)}">` +
-        `<div class="tienda-admin-card-campos">` +
-        `<label>Nombre` +
-        `<input type="text" class="ui-input tienda-admin-nombre" maxlength="80" value="${escapeHtmlAttr(t.nombre || '')}" autocomplete="off">` +
-        `</label>` +
-        `<label>WhatsApp de confirmación` +
-        `<input type="text" class="ui-input tienda-admin-telefono" inputmode="numeric" maxlength="15" value="${escapeHtmlAttr(tel)}" placeholder="10 dígitos" autocomplete="off">` +
-        `</label>` +
-        `</div>` +
-        `<div class="tienda-admin-card-acciones">` +
-        `<button type="button" class="btn-primary rounded-2xl tienda-admin-guardar">${uiIcon('square-pen')} Guardar</button>` +
-        `<button type="button" class="btn-danger rounded-2xl tienda-admin-eliminar"${puedeBorrar ? '' : ' disabled'}>${uiIcon('x')} Eliminar</button>` +
-        (activa ? '<span class="config-notificacion-ayuda" style="margin:0;">En uso ahora</span>' : '') +
-        `</div>` +
-        `</article>`
-      );
-    })
-    .join('');
-  host.querySelectorAll('.tienda-admin-card').forEach((card) => {
-    const id = card.getAttribute('data-tienda-id');
-    const btnG = card.querySelector('.tienda-admin-guardar');
-    const btnE = card.querySelector('.tienda-admin-eliminar');
-    if (btnG) btnG.addEventListener('click', () => void guardarTiendaAdminDesdeCard(card, id));
-    if (btnE && !btnE.disabled) btnE.addEventListener('click', () => confirmarEliminarTiendaAdmin(id));
-  });
+  host.innerHTML = catalogoTiendas.map((t) => htmlFichaTiendaAdmin(t, false)).join('');
+  enlazarAccionesTiendaAdmin(host);
 }
 
 function aplicarCatalogoTiendasDesdeRespuesta(data) {
@@ -223,7 +193,7 @@ function aplicarCatalogoTiendasDesdeRespuesta(data) {
 
 async function guardarTiendaAdminDesdeCard(card, id) {
   if (!esSesionAdmin() || !card || !id) return;
-  const err = document.getElementById('configTiendaConfirmacionError');
+  const err = errorUiTiendaAdmin(card);
   if (err) err.textContent = '';
   const nombre = String(card.querySelector('.tienda-admin-nombre')?.value || '').trim();
   const telefonoConfirmacion = String(card.querySelector('.tienda-admin-telefono')?.value || '').replace(/\D/g, '');
@@ -266,7 +236,11 @@ function confirmarEliminarTiendaAdmin(id) {
 
 async function eliminarTiendaAdmin(id) {
   if (!esSesionAdmin() || !id) return;
-  const err = document.getElementById('configTiendaConfirmacionError');
+  const err =
+    document.getElementById('cambiarTiendaError') &&
+    document.getElementById('modalCambiarTienda')?.style.display === 'flex'
+      ? document.getElementById('cambiarTiendaError')
+      : document.getElementById('configTiendaConfirmacionError');
   if (err) err.textContent = '';
   try {
     const data = await apiJson(`/api/tiendas/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -299,9 +273,79 @@ function cerrarModalCambiarTienda() {
   if (modal) modal.style.display = 'none';
 }
 
+function errorUiTiendaAdmin(card) {
+  if (card && card.closest && card.closest('#modalCambiarTienda')) {
+    return document.getElementById('cambiarTiendaError');
+  }
+  return document.getElementById('configTiendaConfirmacionError');
+}
+
+function enlazarAccionesTiendaAdmin(host) {
+  if (!host) return;
+  host.querySelectorAll('.tienda-admin-card').forEach((card) => {
+    const id = card.getAttribute('data-tienda-id');
+    const btnG = card.querySelector('.tienda-admin-guardar');
+    const btnE = card.querySelector('.tienda-admin-eliminar');
+    if (btnG) {
+      btnG.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        void guardarTiendaAdminDesdeCard(card, id);
+      });
+    }
+    if (btnE && !btnE.disabled) {
+      btnE.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        confirmarEliminarTiendaAdmin(id);
+      });
+    }
+  });
+}
+
+function htmlFichaTiendaAdmin(t, conRadio) {
+  const id = String(t.id);
+  const tel = String(t.telefonoConfirmacion || '').replace(/\D/g, '');
+  const activa = id === String(tiendaActivaId);
+  const puedeBorrar = catalogoTiendas.length > 1;
+  const checked = activa ? ' checked' : '';
+  const radio = conRadio
+    ? (
+      '<label class="tienda-opcion-radio tienda-opcion-radio--en-ficha">' +
+      `<input type="radio" name="tiendaActivaOpcion" value="${escapeHtmlAttr(id)}"${checked}>` +
+      `<span>${activa ? 'En uso ahora' : 'Usar esta tienda'}</span>` +
+      '</label>'
+    )
+    : (activa ? '<span class="config-notificacion-ayuda" style="margin:0;">En uso ahora</span>' : '');
+  return (
+    `<article class="tienda-admin-card" data-tienda-id="${escapeHtmlAttr(id)}">` +
+    radio +
+    `<div class="tienda-admin-card-campos">` +
+    `<label>Nombre` +
+    `<input type="text" class="ui-input tienda-admin-nombre" maxlength="80" value="${escapeHtmlAttr(t.nombre || '')}" autocomplete="off">` +
+    `</label>` +
+    `<label>WhatsApp de confirmación` +
+    `<input type="text" class="ui-input tienda-admin-telefono" inputmode="numeric" maxlength="15" value="${escapeHtmlAttr(tel)}" placeholder="10 dígitos" autocomplete="off">` +
+    `</label>` +
+    `</div>` +
+    `<div class="tienda-admin-card-acciones">` +
+    `<button type="button" class="btn-primary rounded-2xl tienda-admin-guardar">${uiIcon('square-pen')} Guardar</button>` +
+    `<button type="button" class="btn-danger rounded-2xl tienda-admin-eliminar"${puedeBorrar ? '' : ' disabled'}>${uiIcon('x')} Eliminar</button>` +
+    `</div>` +
+    `</article>`
+  );
+}
+
 function pintarListaTiendasCambio() {
   const host = document.getElementById('listaTiendasCambio');
   if (!host) return;
+  if (esSesionAdmin()) {
+    host.classList.add('lista-tiendas-cambio--admin');
+    host.innerHTML = catalogoTiendas.map((t) => htmlFichaTiendaAdmin(t, true)).join('');
+    enlazarAccionesTiendaAdmin(host);
+    return;
+  }
+  host.classList.remove('lista-tiendas-cambio--admin');
   host.innerHTML = catalogoTiendas
     .map((t) => {
       const id = String(t.id);
