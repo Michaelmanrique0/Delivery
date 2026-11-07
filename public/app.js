@@ -137,18 +137,36 @@ function asegurarIdsAlmacenPedidos(lista) {
   return arr;
 }
 
-function indicePedidoVista(pedidoId) {
+function indicePedidoEnTienda(pedidoId, tiendaId) {
   const n = Number(pedidoId);
   if (!Number.isFinite(n)) return -1;
-  const tid = String(tiendaActivaId || TIENDA_DEFAULT_ID);
-  const enTienda = pedidos.findIndex((p) => Number(p.id) === n && idTiendaPedido(p) === tid);
-  if (enTienda >= 0) return enTienda;
-  return pedidos.findIndex((p) => Number(p.id) === n);
+  const tid = String(tiendaId || tiendaActivaId || TIENDA_DEFAULT_ID);
+  const porDisplay = pedidos.findIndex((p) => Number(p.id) === n && idTiendaPedido(p) === tid);
+  if (porDisplay >= 0) return porDisplay;
+  return pedidos.findIndex((p) => idAlmacenPedido(p) === n && idTiendaPedido(p) === tid);
+}
+
+function indicePedidoVista(pedidoId) {
+  return indicePedidoEnTienda(pedidoId, tiendaActivaId);
+}
+
+function pedidoCoincideAccion(p, pedidoId, tiendaId) {
+  if (!p) return false;
+  const n = Number(pedidoId);
+  if (!Number.isFinite(n)) return false;
+  const tid = String(tiendaId || tiendaActivaId || TIENDA_DEFAULT_ID);
+  if (idTiendaPedido(p) !== tid) return false;
+  return Number(p.id) === n || idAlmacenPedido(p) === n;
 }
 
 function pedidoVistaPorId(pedidoId) {
   const ix = indicePedidoVista(pedidoId);
   return ix >= 0 ? pedidos[ix] : null;
+}
+
+function nombreTiendaDePedido(pedido) {
+  const t = tiendaPorId(idTiendaPedido(pedido));
+  return (t && t.nombre) || nombreTiendaActiva();
 }
 
 function nombreTiendaActiva() {
@@ -1009,7 +1027,7 @@ function preservarNotificacionEnCaminoLocal(listaNueva) {
   const prev = new Map((pedidos || []).map((p) => [clavePedido(p), p]));
   return (listaNueva || []).map((p) => {
     const loc = prev.get(clavePedido(p));
-    const esperaEnrutar = pedidoEsperaEnrutarTrasNotificar(p && p.id);
+    const esperaEnrutar = pedidoEsperaEnrutarTrasNotificar(p && p.id, p && idTiendaPedido(p));
     if (p && p.enCurso && !p.entregado && !p.cancelado) {
       if ((loc && loc.notificadoEnCamino) || esperaEnrutar) {
         return {
@@ -2355,7 +2373,7 @@ function actualizarBannerAvisosTelefono() {
 }
 
 function descartarAvisoTelefonoPedido(pedidoId) {
-  const pedido = pedidos.find((p) => p && Number(p.id) === Number(pedidoId));
+  const pedido = pedidoVistaPorId(pedidoId);
   if (!pedido) return;
   delete pedido.avisoTelefono;
   guardarPedidos();
@@ -2363,7 +2381,7 @@ function descartarAvisoTelefonoPedido(pedidoId) {
 }
 
 function notificarVendedorTelefonoInvalido(pedidoId) {
-  const pedido = pedidos.find((p) => p && Number(p.id) === Number(pedidoId));
+  const pedido = pedidoVistaPorId(pedidoId);
   if (!pedido || !pedido.avisoTelefono) {
     mostrarToast('No hay aviso de teléfono para este pedido.', 'warning');
     return;
@@ -2442,7 +2460,7 @@ function limpiarNotificacionEnCaminoPedido(pedido) {
 function completarNotificacionEnCaminoPedido(pedido) {
   if (!pedido) return;
   pedido.notificadoEnCamino = true;
-  if (pedido.id != null) marcarPedidoNotificadoEnSesion(pedido.id);
+  if (pedido.id != null) marcarPedidoNotificadoEnSesion(pedido);
 }
 
 function seleccionarTelefonoConModal(tels, titulo, onElegir) {
@@ -3083,7 +3101,7 @@ async function procesarPedido() {
   guardarPedidos();
   renderPedidos();
   void forzarSyncPedidosAhora().catch((e) => console.error(e));
-  const pedidoAviso = pedidos.find((p) => Number(p.id) === Number(pedidoFinalId));
+  const pedidoAviso = pedidoVistaPorId(pedidoFinalId);
   if (pedidoAviso && pedidoAviso.avisoTelefono) scrollToTopApp();
 
   setTimeout(() => actualizarMarcadores(), 500);
@@ -4649,7 +4667,11 @@ async function eliminarPedido(index) {
     claseConfirmar: 'btn-danger',
     mostrarSecundario: false,
     onConfirmar: () => {
-      const ix = pedidos.findIndex((p) => Number(p.id) === idRef);
+      const sid = idAlmacenPedido(pedido);
+      const tid = idTiendaPedido(pedido);
+      const ix = pedidos.findIndex(
+        (p) => idAlmacenPedido(p) === sid && idTiendaPedido(p) === tid
+      );
       if (ix < 0) return;
       pedidos.splice(ix, 1);
       guardarPedidos();
@@ -4927,7 +4949,7 @@ function guardarEdicionPedido() {
   const { index, pedidoId } = edicionPedidoPendiente;
   let pedido = Number.isInteger(index) ? pedidos[index] : null;
   if (pedidoId != null && (!pedido || Number(pedido.id) !== Number(pedidoId))) {
-    pedido = pedidos.find((p) => p && Number(p.id) === Number(pedidoId)) || null;
+    pedido = obtenerPedidoPorId(pedidoId, index).pedido;
   }
   if (!pedido) {
     mostrarAvisoEnApp('No se pudo guardar: vuelve a abrir Editar e intenta de nuevo.', 'Editar pedido');
@@ -5891,9 +5913,10 @@ function limpiarFlujoPostCierrePedido() {
   flujoPostCierreEstabaOculto = false;
 }
 
-function iniciarFlujoPostCierrePedido({ pedidoId, tipo, mensajeTienda, enviarWhatsAppAdmin = true }) {
+function iniciarFlujoPostCierrePedido({ pedidoId, tipo, mensajeTienda, enviarWhatsAppAdmin = true, tiendaId }) {
   flujoPostCierrePedido = {
     pedidoId,
+    tiendaId: String(tiendaId || tiendaActivaId || TIENDA_DEFAULT_ID),
     tipo, // 'porteria' | 'no_entregado'
     mensajeTienda: String(mensajeTienda || ''),
     enviarWhatsAppAdmin: enviarWhatsAppAdmin !== false,
@@ -5922,7 +5945,7 @@ function enviarMensajeTiendaFlujoPostCierre() {
     window.setTimeout(() => ofrecerNotificarClienteTrasCierrePedido(), 0);
     return;
   }
-  const pedidoFlujo = pedidos.find((p) => Number(p.id) === Number(flujo.pedidoId));
+  const pedidoFlujo = obtenerPedidoPorId(flujo.pedidoId, null, flujo.tiendaId).pedido;
   const numeroAdmin = obtenerSoporteWhatsApp(pedidoFlujo);
   const mensaje = String(flujo.mensajeTienda || '');
   flujo.fase = 'esperando_retorno_tienda';
@@ -5945,7 +5968,7 @@ function ofrecerNotificarClienteTrasCierrePedido() {
   if (!flujo || flujo.fase !== 'preguntar_cliente') return false;
   if (hayModalBloqueandoNotificacionCliente()) return false;
 
-  const pedido = pedidos.find((p) => Number(p.id) === Number(flujo.pedidoId));
+  const pedido = obtenerPedidoPorId(flujo.pedidoId, null, flujo.tiendaId).pedido;
   if (!pedido) {
     continuarConSiguientePedidoTrasCierre();
     return false;
@@ -5957,7 +5980,7 @@ function ofrecerNotificarClienteTrasCierrePedido() {
       return false;
     }
     const id = Number(pedido.id);
-    const indexFinal = pedidos.findIndex((p) => Number(p.id) === id);
+    const indexFinal = indicePedidoEnTienda(id, flujo.tiendaId);
     mostrarModalDecision({
       titulo: 'Notificar al cliente',
       texto: `El pedido #${pedido.id} quedó en portería.\n¿Quieres notificarle al cliente?`,
@@ -5979,7 +6002,7 @@ function ofrecerNotificarClienteTrasCierrePedido() {
       return false;
     }
     const id = Number(pedido.id);
-    const indexFinal = pedidos.findIndex((p) => Number(p.id) === id);
+    const indexFinal = indicePedidoEnTienda(id, flujo.tiendaId);
     mostrarModalDecision({
       titulo: 'Notificar al cliente',
       texto: `El pedido #${pedido.id} no fue entregado.\n¿Quieres notificarle al cliente?`,
@@ -6019,7 +6042,7 @@ function declinarNotificarClienteNoEntregado(pedido) {
 }
 
 function notificarClienteEntregaPorteria(index, pedidoId) {
-  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal || !pedidoPendienteNotificarClientePorteria(pedidoFinal)) {
@@ -6037,7 +6060,12 @@ function notificarClienteEntregaPorteria(index, pedidoId) {
     pedidoFinal.pendienteNotificarClientePorteria = false;
     pedidoFinal.clienteNotificadoPorteria = true;
     porteriaClienteModalOfrecido.add(Number(pedidoFinal.id));
-    if (flujoPostCierrePedido && Number(flujoPostCierrePedido.pedidoId) === Number(pedidoFinal.id)) {
+    if (
+      flujoPostCierrePedido &&
+      Number(flujoPostCierrePedido.pedidoId) === Number(pedidoFinal.id) &&
+      (!flujoPostCierrePedido.tiendaId ||
+        String(flujoPostCierrePedido.tiendaId) === idTiendaPedido(pedidoFinal))
+    ) {
       flujoPostCierrePedido.fase = 'esperando_retorno_cliente';
       flujoPostCierreEstabaOculto = false;
     }
@@ -6051,14 +6079,14 @@ function ofrecerNotificarClientePorteriaSiPendiente() {
   if (flujoPostCierrePedido && flujoPostCierrePedido.fase === 'preguntar_cliente') {
     return ofrecerNotificarClienteTrasCierrePedido();
   }
-  const pendiente = pedidos.find((p) => pedidoPendienteNotificarClientePorteria(p));
+  const pendiente = pedidosDeTiendaActiva().find((p) => pedidoPendienteNotificarClientePorteria(p));
   if (!pendiente) return false;
   const id = Number(pendiente.id);
   if (porteriaClienteModalOfrecido.has(id)) return false;
   if (hayModalBloqueandoNotificacionCliente()) return false;
 
   porteriaClienteModalOfrecido.add(id);
-  const indexFinal = pedidos.findIndex((p) => Number(p.id) === id);
+  const indexFinal = indicePedidoEnTienda(id);
   mostrarModalDecision({
     titulo: 'Notificar al cliente',
     texto: `El pedido #${pendiente.id} quedó en portería.\n¿Quieres notificarle al cliente?`,
@@ -6139,7 +6167,7 @@ function hayModalBloqueandoNotificacionCliente() {
 }
 
 function notificarClienteNoEntregado(index, pedidoId) {
-  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal || !pedidoPendienteNotificarClienteNoEntregado(pedidoFinal)) {
@@ -6157,7 +6185,12 @@ function notificarClienteNoEntregado(index, pedidoId) {
     pedidoFinal.pendienteNotificarClienteNoEntregado = false;
     pedidoFinal.clienteNotificadoNoEntregado = true;
     noEntregadoClienteModalOfrecido.add(Number(pedidoFinal.id));
-    if (flujoPostCierrePedido && Number(flujoPostCierrePedido.pedidoId) === Number(pedidoFinal.id)) {
+    if (
+      flujoPostCierrePedido &&
+      Number(flujoPostCierrePedido.pedidoId) === Number(pedidoFinal.id) &&
+      (!flujoPostCierrePedido.tiendaId ||
+        String(flujoPostCierrePedido.tiendaId) === idTiendaPedido(pedidoFinal))
+    ) {
       flujoPostCierrePedido.fase = 'esperando_retorno_cliente';
       flujoPostCierreEstabaOculto = false;
     }
@@ -6171,14 +6204,14 @@ function ofrecerNotificarClienteNoEntregadoSiPendiente() {
   if (flujoPostCierrePedido && flujoPostCierrePedido.fase === 'preguntar_cliente') {
     return ofrecerNotificarClienteTrasCierrePedido();
   }
-  const pendiente = pedidos.find((p) => pedidoPendienteNotificarClienteNoEntregado(p));
+  const pendiente = pedidosDeTiendaActiva().find((p) => pedidoPendienteNotificarClienteNoEntregado(p));
   if (!pendiente) return false;
   const id = Number(pendiente.id);
   if (noEntregadoClienteModalOfrecido.has(id)) return false;
   if (hayModalBloqueandoNotificacionCliente()) return false;
 
   noEntregadoClienteModalOfrecido.add(id);
-  const indexFinal = pedidos.findIndex((p) => Number(p.id) === id);
+  const indexFinal = indicePedidoEnTienda(id);
   mostrarModalDecision({
     titulo: 'Notificar al cliente',
     texto: `El pedido #${pendiente.id} no fue entregado.\n¿Quieres notificarle al cliente?`,
@@ -6345,9 +6378,9 @@ ${productos}`;
 }
 
 async function registrarDevolucionCliente(index, pedidoId, monto, metodo) {
-  const indexActual = pedidos.findIndex((p) => Number(p.id) === Number(pedidoId));
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
-  const pedido = pedidos[indexFinal];
+  if (!pedido) return;
   if (!pedido) return;
 
   const montoNum = Number(monto || 0);
@@ -6391,9 +6424,8 @@ async function registrarDevolucionCliente(index, pedidoId, monto, metodo) {
 }
 
 async function registrarEntregaConPago(index, pedidoId, datosPago) {
-  const indexActual = pedidos.findIndex((p) => p.id === pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
-  const pedido = pedidos[indexFinal];
   if (!pedido) return;
 
   const datosAjustados = aplicarAjusteVueltasDigitalesSobreMontos(datosPago);
@@ -6447,6 +6479,7 @@ async function registrarEntregaConPago(index, pedidoId, datosPago) {
     void persistirHistorialTrasCierrePedido(pedido);
     iniciarFlujoPostCierrePedido({
       pedidoId,
+      tiendaId: idTiendaPedido(pedido),
       tipo: 'porteria',
       mensajeTienda: mensaje,
       enviarWhatsAppAdmin,
@@ -6587,9 +6620,8 @@ function confirmarCambioEntrega() {
 
 function seleccionarMetodoPagoEntregado(metodo) {
   const { index, pedidoId } = pagoEntregadoPendiente;
-  const indexActual = pedidos.findIndex(p => p.id === pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
-  const pedido = pedidos[indexFinal];
   if (!pedido) return;
 
   const totalPedido = parseMontoEntero(pedido.valor);
@@ -6751,9 +6783,8 @@ function fotoNoEntregado(index, pedidoId) {
 }
 
 async function procesarFotoNoEntregado(index, pedidoId, enUbicacion, motivo) {
-  const indexActual = pedidos.findIndex(p => p.id === pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
-  const pedido = pedidos[indexFinal];
   if (!pedido) return;
 
   const mensajeTienda = construirMensajeNoEntregadoTienda(pedido, pedidoId, enUbicacion, motivo);
@@ -6772,6 +6803,7 @@ async function procesarFotoNoEntregado(index, pedidoId, enUbicacion, motivo) {
 
   iniciarFlujoPostCierrePedido({
     pedidoId,
+    tiendaId: idTiendaPedido(pedido),
     tipo: 'no_entregado',
     mensajeTienda,
     enviarWhatsAppAdmin: true,
@@ -6807,8 +6839,13 @@ function getUbicacionPedido(index, pedidoId) {
   return null;
 }
 
-function obtenerPedidoPorId(pedidoId) {
-  const indexActual = pedidos.findIndex(p => p.id === pedidoId);
+function obtenerPedidoPorId(pedidoId, indexSugerido, tiendaId) {
+  const tid = String(tiendaId || tiendaActivaId || TIENDA_DEFAULT_ID);
+  const ixSug = Number(indexSugerido);
+  if (Number.isInteger(ixSug) && ixSug >= 0 && pedidoCoincideAccion(pedidos[ixSug], pedidoId, tid)) {
+    return { pedido: pedidos[ixSug], indexActual: ixSug };
+  }
+  const indexActual = indicePedidoEnTienda(pedidoId, tid);
   if (indexActual >= 0) return { pedido: pedidos[indexActual], indexActual };
   return { pedido: null, indexActual: -1 };
 }
@@ -6831,15 +6868,22 @@ function leerPendienteEnrutarTrasNotif() {
   return pend;
 }
 
-function pedidoEsperaEnrutarTrasNotificar(pedidoId) {
+function pedidoEsperaEnrutarTrasNotificar(pedidoId, tiendaId) {
   const pend = leerPendienteEnrutarTrasNotif();
-  return !!(pend && Number(pend.pedidoId) === Number(pedidoId));
+  if (!pend || Number(pend.pedidoId) !== Number(pedidoId)) return false;
+  if (pend.tiendaId) {
+    return String(pend.tiendaId) === String(tiendaId || tiendaActivaId || TIENDA_DEFAULT_ID);
+  }
+  return true;
 }
 
 function alinearNotificacionSiSiguePendiente(pedido) {
   if (!pedido || pedido.cancelado || pedido.entregado) return pedido;
   if (pedido.enCurso) return pedido;
-  if (pedidoEsperaEnrutarTrasNotificar(pedido.id) || pedidoEsperaSegundoTelTrasNotificar(pedido.id)) {
+  if (
+    pedidoEsperaEnrutarTrasNotificar(pedido.id, idTiendaPedido(pedido)) ||
+    pedidoEsperaSegundoTelTrasNotificar(pedido.id, idTiendaPedido(pedido))
+  ) {
     pedido.notificadoEnCamino = true;
     return pedido;
   }
@@ -6859,7 +6903,7 @@ function obtenerEtapaPedidoUI(pedido) {
 }
 
 function abrirNavegacionConSelector(index, pedidoId) {
-  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal) return;
@@ -6912,7 +6956,7 @@ function enrutarConApps(index, pedidoId) {
 }
 
 function abrirNavegacion(tipo, index, pedidoId) {
-  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal) return;
@@ -6949,10 +6993,10 @@ function abrirNavegacion(tipo, index, pedidoId) {
 }
 
 function manejarNavegacionConNotificacion(index, pedidoId, tipoNavegacion) {
-  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   if (!pedido) return;
-  if (!pedido.notificadoEnCamino && !pedidoEsperaEnrutarTrasNotificar(pedidoId)) {
+  if (!pedido.notificadoEnCamino && !pedidoEsperaEnrutarTrasNotificar(pedidoId, idTiendaPedido(pedido))) {
     void notificarEnCamino(indexFinal, pedidoId, {
       abrirEnrutarDespues: true,
       directoWhatsApp: true,
@@ -6972,7 +7016,7 @@ function enrutarConWaze(index, pedidoId) {
 }
 
 function marcarLlegueDestino(index, pedidoId) {
-  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal || pedidoFinal.entregado || pedidoFinal.cancelado || !pedidoFinal.enCurso) return;
@@ -7019,7 +7063,7 @@ function mostrarOpcionesFinalizarEntrega(index, pedidoId, opts = {}) {
 }
 
 function mostrarConfirmacionValorPedido(index, pedidoId) {
-  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal) return;
@@ -7090,7 +7134,7 @@ function cerrarModalEditarValorMensajero() {
 }
 
 function mostrarModalEditarValorMensajero(index, pedidoId) {
-  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal) return;
@@ -7118,7 +7162,7 @@ function mostrarModalEditarValorMensajero(index, pedidoId) {
 
 function confirmarEdicionValorMensajero() {
   const { index, pedidoId } = edicionValorMensajeroPendiente;
-  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal) {
@@ -7160,7 +7204,7 @@ function cerrarModalFinalizacionEntrega() {
 }
 
 function obtenerSiguientePedidoActivo(excluirPedidoId) {
-  return pedidos.find((p) =>
+  return pedidosDeTiendaActiva().find((p) =>
     p &&
     !p.cancelado &&
     !p.entregado &&
@@ -7172,7 +7216,7 @@ function obtenerSiguientePedidoActivo(excluirPedidoId) {
 function notificarSiguientePedido(excluirPedidoId) {
   const siguiente = obtenerSiguientePedidoActivo(excluirPedidoId);
   if (!siguiente) return;
-  const indexSiguiente = pedidos.findIndex((p) => Number(p.id) === Number(siguiente.id));
+  const indexSiguiente = indicePedidoEnTienda(siguiente.id);
   if (indexSiguiente < 0) return;
 
   mostrarModalDecision({
@@ -7197,7 +7241,7 @@ function notificarSiguientePedido(excluirPedidoId) {
 function finalizarEntregaConResultado(tipoFinalizacion) {
   const { index, pedidoId } = finalizacionPendiente;
   cerrarModalFinalizacionEntrega();
-  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal) return;
@@ -7250,22 +7294,32 @@ function idsNotificadosEnCaminoSesion() {
   try {
     const raw = sessionStorage.getItem(NOTIF_CAMINO_IDS_SS_KEY);
     const arr = raw ? JSON.parse(raw) : [];
-    return new Set(Array.isArray(arr) ? arr.map(Number).filter(Number.isFinite) : []);
+    return new Set(Array.isArray(arr) ? arr.map(String).filter(Boolean) : []);
   } catch (_e) {
     return new Set();
   }
 }
 
-function marcarPedidoNotificadoEnSesion(pedidoId) {
+function marcarPedidoNotificadoEnSesion(pedidoOId) {
+  const clave = pedidoOId && typeof pedidoOId === 'object'
+    ? clavePedido(pedidoOId)
+    : `${tiendaActivaId || TIENDA_DEFAULT_ID}::${Number(pedidoOId)}`;
+  if (!clave) return;
   const ids = idsNotificadosEnCaminoSesion();
-  ids.add(Number(pedidoId));
+  ids.add(clave);
   try {
     sessionStorage.setItem(NOTIF_CAMINO_IDS_SS_KEY, JSON.stringify([...ids]));
   } catch (_e) {}
 }
 
 function programarEnrutarTrasNotificacion(indexFinal, pedidoId) {
-  enrutarTrasNotificacionPendiente = { indexFinal, pedidoId, at: Date.now() };
+  const pedido = pedidos[indexFinal];
+  enrutarTrasNotificacionPendiente = {
+    indexFinal,
+    pedidoId,
+    tiendaId: pedido ? idTiendaPedido(pedido) : String(tiendaActivaId || TIENDA_DEFAULT_ID),
+    at: Date.now(),
+  };
   try {
     sessionStorage.setItem(
       ENRUTAR_TRAS_NOTIF_SS_KEY,
@@ -7277,7 +7331,13 @@ function programarEnrutarTrasNotificacion(indexFinal, pedidoId) {
 const SEGUNDO_TEL_TRAS_NOTIF_SS_KEY = 'deliverySegundoTelTrasNotif_v1';
 
 function programarSegundoTelefonoTrasNotificacion(indexFinal, pedidoId) {
-  segundoTelTrasNotificacionPendiente = { indexFinal, pedidoId, at: Date.now() };
+  const pedido = pedidos[indexFinal];
+  segundoTelTrasNotificacionPendiente = {
+    indexFinal,
+    pedidoId,
+    tiendaId: pedido ? idTiendaPedido(pedido) : String(tiendaActivaId || TIENDA_DEFAULT_ID),
+    at: Date.now(),
+  };
   try {
     sessionStorage.setItem(
       SEGUNDO_TEL_TRAS_NOTIF_SS_KEY,
@@ -7309,9 +7369,13 @@ function leerPendienteSegundoTelTrasNotif() {
   return pend;
 }
 
-function pedidoEsperaSegundoTelTrasNotificar(pedidoId) {
+function pedidoEsperaSegundoTelTrasNotificar(pedidoId, tiendaId) {
   const pend = leerPendienteSegundoTelTrasNotif();
-  return !!(pend && Number(pend.pedidoId) === Number(pedidoId));
+  if (!pend || Number(pend.pedidoId) !== Number(pedidoId)) return false;
+  if (pend.tiendaId) {
+    return String(pend.tiendaId) === String(tiendaId || tiendaActivaId || TIENDA_DEFAULT_ID);
+  }
+  return true;
 }
 
 function ofrecerSegundoTelefonoTrasNotificacionSiPendiente() {
@@ -7322,7 +7386,7 @@ function ofrecerSegundoTelefonoTrasNotificacionSiPendiente() {
     if (segundoTelTrasNotificacionPendiente) limpiarEsperaSegundoTelTrasNotificacion();
     return false;
   }
-  const { pedido, indexActual } = obtenerPedidoPorId(pend.pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pend.pedidoId, pend.indexFinal, pend.tiendaId);
   if (!pedido || pedido.enCurso || pedido.entregado || pedido.cancelado) {
     limpiarEsperaSegundoTelTrasNotificacion();
     return false;
@@ -7385,7 +7449,7 @@ function mostrarModalEnrutarTrasNotificacion(indexFinal, pedidoId, opciones) {
       enrutarConApps(indexFinal, pedidoId);
     },
     onCancelar: () => {
-      const { pedido } = obtenerPedidoPorId(pedidoId);
+      const { pedido } = obtenerPedidoPorId(pedidoId, indexFinal);
       limpiarEsperaEnrutarTrasNotificacion();
       if (pedido && !pedido.enCurso && !pedido.entregado && !pedido.cancelado) {
         limpiarNotificacionEnCaminoPedido(pedido);
@@ -7399,7 +7463,7 @@ function mostrarModalEnrutarTrasNotificacion(indexFinal, pedidoId, opciones) {
 function persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, tel) {
   registrarTelefonoNotificadoEnCamino(pedidoFinal, tel);
   completarNotificacionEnCaminoPedido(pedidoFinal);
-  if (pedidoFinal && pedidoFinal.id != null) marcarPedidoNotificadoEnSesion(pedidoFinal.id);
+  if (pedidoFinal && pedidoFinal.id != null) marcarPedidoNotificadoEnSesion(pedidoFinal);
   guardarPedidos();
   renderPedidos();
 }
@@ -7426,7 +7490,7 @@ function ofrecerEnrutarTrasNotificacionSiPendiente() {
   }
   enrutarTrasNotificacionPendiente = pend;
 
-  const { pedido } = obtenerPedidoPorId(pend.pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pend.pedidoId, pend.indexFinal, pend.tiendaId);
   const objetivo = pedido;
   if (!objetivo) return false;
   if (objetivo.enCurso || objetivo.entregado || objetivo.cancelado) {
@@ -7439,8 +7503,8 @@ function ofrecerEnrutarTrasNotificacionSiPendiente() {
     renderPedidos();
   }
   if (!objetivo.notificadoEnCamino) return false;
-  const idx = pedidos.findIndex((p) => Number(p.id) === Number(objetivo.id));
-  mostrarModalEnrutarTrasNotificacion(idx >= 0 ? idx : 0, objetivo.id, { abrirEnrutarDespues: true });
+  const idx = indexActual >= 0 ? indexActual : Number(pend.indexFinal) || 0;
+  mostrarModalEnrutarTrasNotificacion(idx, objetivo.id, { abrirEnrutarDespues: true });
   return true;
 }
 
@@ -7571,8 +7635,9 @@ function construirMensajeNotificarEnCamino(pedido) {
   const incluirMediosPago = !esCambio && monto > 0;
   const bloquePago = incluirMediosPago ? construirBloquePagoNotificacion() : '';
 
+  const nombreTienda = nombreTiendaDePedido(pedido);
   const anuncioCamino = conDisculpa
-    ? `Soy el mensajero externo de Valero Storee. Te pido disculpas por la demora: por clima o por tráfico los pedidos se han demorado. Te confirmo que ya *VOY EN CAMINO* hacia tu ubicación de entrega y que *aún no he llegado*.`
+    ? `Soy el mensajero externo de ${nombreTienda}. Te pido disculpas por la demora: por clima o por tráfico los pedidos se han demorado. Te confirmo que ya *VOY EN CAMINO* hacia tu ubicación de entrega y que *aún no he llegado*.`
     : `Te confirmo que ya *VOY EN CAMINO* hacia tu ubicación de entrega y que *aún no he llegado*.`;
 
   const consideraciones = [
@@ -7629,10 +7694,14 @@ function continuarTrasAbrirWhatsAppNotificacion(indexFinal, pedidoId, pedidoFina
 }
 
 async function notificarEnCamino(index, pedidoId, opciones = {}) {
-  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId);
+  const { pedido, indexActual } = obtenerPedidoPorId(pedidoId, index);
   const indexFinal = indexActual >= 0 ? indexActual : index;
   const pedidoFinal = pedido || pedidos[indexFinal];
   if (!pedidoFinal) return;
+  if (idTiendaPedido(pedidoFinal) !== String(tiendaActivaId || TIENDA_DEFAULT_ID)) {
+    mostrarToast('Este pedido no pertenece a la tienda activa.', 'warning');
+    return;
+  }
 
   limpiarNotificacionEnCaminoPedido(pedidoFinal);
 
@@ -7692,7 +7761,7 @@ function htmlPopupPedidoMapa(pedidoId, productos) {
 }
 
 function generarMensajeUbicacionesMuyCercanas() {
-  const activos = pedidos.filter(
+  const activos = pedidosDeTiendaActiva().filter(
     (p) => !p.cancelado && p.coords && Number.isFinite(p.coords.lat) && Number.isFinite(p.coords.lng)
   );
   const pares = [];
