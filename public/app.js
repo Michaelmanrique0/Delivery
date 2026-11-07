@@ -3870,7 +3870,7 @@ function crearTarjetaPedido(pedido, index) {
       <div class="pedido-numero">Pedido #${pedido.id}${estadoTexto}</div>
       <div class="pedido-header-btns">
         ${adminUi && !pedido.cancelado ? `<button type="button" class="btn-edit" onclick="event.preventDefault(); event.stopPropagation(); editarPedido(${index})" style="padding: 5px 10px; font-size: 12px;">${uiIcon('square-pen')} Editar</button>` : ''}
-        ${adminUi ? `<button class="btn-danger btn-icon-only" onclick="eliminarPedido(${index})" title="Eliminar pedido" aria-label="Eliminar pedido">${uiIcon('trash')}</button>` : ''}
+        ${adminUi ? `<button type="button" class="btn-danger btn-icon-only" onclick="eliminarPedido(${index})" title="Eliminar pedido" aria-label="Eliminar pedido">${uiIcon('x')}</button>` : ''}
       </div>
     </div>
     <div class="pedido-cliente">${escapeHtmlTexto(String(pedido.nombre || '').trim() || 'No especificado')}</div>

@@ -316,10 +316,12 @@ button {
   margin: 0 !important;
   padding: 0 !important;
   display: block;
+  justify-self: center;
+  align-self: center;
   vertical-align: 0;
-  width: 17px;
-  height: 17px;
-  transform: translateX(1px);
+  width: 16px;
+  height: 16px;
+  transform: none;
 }
 
 .btn-warning {
