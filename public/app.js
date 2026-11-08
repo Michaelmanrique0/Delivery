@@ -205,6 +205,7 @@ function aplicarCatalogoTiendasDesdeRespuesta(data) {
   actualizarTextoCabeceraUsuario();
   pintarListaTiendasAdmin();
   pintarListaTiendasCambio();
+  guardarCatalogoTiendasLocal();
   renderPedidos();
   actualizarMarcadores();
 }
@@ -282,8 +283,37 @@ async function cargarTiendasDesdeApi() {
     ? data.tiendas
     : [{ id: TIENDA_DEFAULT_ID, nombre: 'Tienda principal' }];
   tiendaActivaId = String(data.tiendaActivaId || catalogoTiendas[0].id);
+  guardarCatalogoTiendasLocal();
   actualizarTextoCabeceraUsuario();
   return data;
+}
+
+function claveCacheTiendas() {
+  const uid = sesionUsuario?.id || getAuthActiveUserId() || '0';
+  return `deliveryTiendas_v1_${uid}`;
+}
+
+function guardarCatalogoTiendasLocal() {
+  try {
+    localStorage.setItem(
+      claveCacheTiendas(),
+      JSON.stringify({ tiendas: catalogoTiendas, tiendaActivaId })
+    );
+  } catch (_e) {}
+}
+
+function cargarCatalogoTiendasLocal() {
+  try {
+    const raw = localStorage.getItem(claveCacheTiendas());
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data.tiendas) || !data.tiendas.length) return false;
+    catalogoTiendas = data.tiendas;
+    if (data.tiendaActivaId) tiendaActivaId = String(data.tiendaActivaId);
+    return true;
+  } catch (_e) {
+    return false;
+  }
 }
 
 function cerrarModalCambiarTienda() {
@@ -841,6 +871,9 @@ async function forzarSyncPedidosAhora() {
 }
 
 function flushSyncPedidosAlSalir() {
+  try {
+    guardarCachePedidos();
+  } catch (_e) {}
   if (syncRemotoTimer) {
     clearTimeout(syncRemotoTimer);
     syncRemotoTimer = null;
@@ -891,6 +924,29 @@ function hayAlgunModalAbierto() {
   return false;
 }
 
+function firmaPedidosParaRefresco() {
+  let s = '';
+  for (const p of pedidos) {
+    if (!p) continue;
+    s +=
+      Number(p.id) +
+      ':' +
+      (p.entregado ? 1 : 0) +
+      (p.enCurso ? 1 : 0) +
+      (p.cancelado ? 1 : 0) +
+      (p.llegoDestino ? 1 : 0) +
+      (p.notificadoEnCamino ? 1 : 0) +
+      '|' +
+      (p.assignedTo || '') +
+      '|' +
+      (p.valor || '') +
+      '|' +
+      (p.nombre || '') +
+      ';';
+  }
+  return s;
+}
+
 function configurarRefrescoPedidosMensajero() {
   if (configurarRefrescoPedidosMensajero._listo) return;
   configurarRefrescoPedidosMensajero._listo = true;
@@ -900,19 +956,16 @@ function configurarRefrescoPedidosMensajero() {
     if (hayAlgunModalAbierto()) return;
     if (syncPedidosEnCurso) return;
     if (hayPedidosSyncPendiente()) return;
-    const antes = pedidos.map((p) => Number(p.id)).join(',');
+    const antes = firmaPedidosParaRefresco();
     refrescarPedidosDesdeApi()
       .then(() => {
-        const despues = pedidos.map((p) => Number(p.id)).join(',');
+        const despues = firmaPedidosParaRefresco();
         if (antes === despues) return;
         renderPedidos();
-        redibujarRutaDebounced(80);
-        const idsAntes = antes.split(',').filter(Boolean).sort().join(',');
-        const idsDespues = despues.split(',').filter(Boolean).sort().join(',');
-        if (idsAntes !== idsDespues) actualizarMarcadores({ conservarVista: true });
+        actualizarMarcadores({ conservarVista: true });
       })
       .catch((e) => console.error(e));
-  }, 4000);
+  }, 15000);
 }
 
 function configurarFlushSyncPedidosAlSalir() {
@@ -1165,7 +1218,7 @@ async function refrescarPedidosDesdeApi() {
   const localRutaRev = rutaLocalRev || cargarRutaLocalRev();
   const reordenLocalMasNuevo =
     (hayPedidosSyncPendiente() || syncPedidosEnCurso) && localRutaRev > serverRutaRev;
-  if (reordenLocalMasNuevo) {
+  if (reordenLocalMasNuevo || hayPedidosSyncPendiente() || syncPedidosEnCurso) {
     fijarPedidosEnMemoria(fusionarPedidosMensajeroConservandoOrden(delServidor, true));
     return;
   }
@@ -1646,6 +1699,35 @@ function mostrarErrorMediosPagoTienda(texto) {
   if (err) err.textContent = String(texto || '');
 }
 
+function claveCachePayment() {
+  const uid = sesionUsuario?.id || getAuthActiveUserId() || '0';
+  return `deliveryPayment_v1_${uid}`;
+}
+
+function guardarPaymentConfigLocal() {
+  try {
+    localStorage.setItem(claveCachePayment(), JSON.stringify(paymentConfigEstado));
+  } catch (_e) {}
+}
+
+function cargarPaymentConfigLocal() {
+  try {
+    const raw = localStorage.getItem(claveCachePayment());
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return false;
+    paymentConfigEstado = {
+      personal: parsearMediosPagoCliente(data.personal),
+      usarMediosTienda: !!data.usarMediosTienda,
+      tienda: parsearMediosPagoCliente(data.tienda),
+      effective: parsearMediosPagoCliente(data.effective),
+    };
+    return true;
+  } catch (_e) {
+    return false;
+  }
+}
+
 async function refrescarPaymentConfigDesdeServidor() {
   if (!sesionUsuario) return;
   try {
@@ -1656,8 +1738,10 @@ async function refrescarPaymentConfigDesdeServidor() {
       tienda: parsearMediosPagoCliente(data.tienda),
       effective: parsearMediosPagoCliente(data.effective),
     };
+    guardarPaymentConfigLocal();
   } catch (e) {
     console.error(e);
+    cargarPaymentConfigLocal();
   }
 }
 
@@ -1958,6 +2042,7 @@ async function guardarConfigNotificacionDesdeUI(mostrarMensaje = true) {
       tienda: parsearMediosPagoCliente(data.tienda),
       effective: parsearMediosPagoCliente(data.effective),
     };
+    guardarPaymentConfigLocal();
   } catch (e) {
     mostrarErrorConfigNotificacion(String(e.message || e));
     if (pendiente) notificacionEnCaminoPendienteTrasConfig = pendiente;
@@ -1994,6 +2079,7 @@ async function guardarMediosPagoTiendaDesdeUI() {
       body: JSON.stringify({ tienda }),
     });
     paymentConfigEstado.tienda = parsearMediosPagoCliente(data.tienda);
+    guardarPaymentConfigLocal();
     mostrarToast('Medios de pago de la tienda guardados.', 'success');
     cargarMediosPagoTiendaEnUI();
   } catch (e) {
@@ -7861,7 +7947,26 @@ function aplicarSeparacionVisualMarcadores() {
   });
 }
 
+let marcadoresRefreshTimer = null;
+let marcadoresRefreshOpts = null;
+
 function actualizarMarcadores(opciones) {
+  const opts = opciones || {};
+  if (!marcadoresRefreshOpts) {
+    marcadoresRefreshOpts = { conservarVista: !!opts.conservarVista };
+  } else if (!opts.conservarVista) {
+    marcadoresRefreshOpts.conservarVista = false;
+  }
+  if (marcadoresRefreshTimer) clearTimeout(marcadoresRefreshTimer);
+  marcadoresRefreshTimer = setTimeout(() => {
+    marcadoresRefreshTimer = null;
+    const listo = marcadoresRefreshOpts || {};
+    marcadoresRefreshOpts = null;
+    actualizarMarcadoresAhora(listo);
+  }, 160);
+}
+
+function actualizarMarcadoresAhora(opciones) {
   if (!mapa) return;
   const conservarVista = !!(opciones && opciones.conservarVista);
   if (!conservarVista) mapaAjustado = false;
@@ -8966,6 +9071,7 @@ async function iniciarApp() {
   actualizarBannerOffline();
   configurarFlushSyncPedidosAlSalir();
   configurarRefrescoPedidosMensajero();
+  cargarCatalogoTiendasLocal();
 
   if (!appEstaOnline()) {
     cargarPedidosDesdeLocalStorage();
@@ -9112,7 +9218,10 @@ async function entrarAppConSesion(user) {
       await refrescarPaymentConfigDesdeServidor();
     } catch (e) {
       console.error(e);
+      cargarPaymentConfigLocal();
     }
+  } else {
+    cargarPaymentConfigLocal();
   }
   await iniciarApp();
 }
