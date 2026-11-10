@@ -638,11 +638,19 @@ html.dark .pedido.cancelado .pedido-numero {
   margin-bottom: 0;
 }
 
+.pedido-btn-cerrar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+}
+
 .pedido-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 15px;
+  padding-right: 42px;
 }
 
 .pedido-header-btns {

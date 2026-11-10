@@ -4145,11 +4145,11 @@ function crearTarjetaPedido(pedido, index) {
     : (pedido.cancelado ? ' - Cancelado' : (pedido.enCurso ? (pedido.llegoDestino ? ' - En destino' : ' - En ruta') : ''));
 
   div.innerHTML = `
+    <button type="button" class="btn-danger btn-icon-only pedido-btn-cerrar" onclick="event.preventDefault(); event.stopPropagation(); preguntarEliminarPedido(${index})" title="Quitar pedido" aria-label="Quitar pedido">${uiIcon('x')}</button>
     <div class="pedido-header">
       <div class="pedido-numero">Pedido #${pedido.id}${estadoTexto}</div>
       <div class="pedido-header-btns">
         ${adminUi && !pedido.cancelado ? `<button type="button" class="btn-edit" onclick="event.preventDefault(); event.stopPropagation(); editarPedido(${index})" style="padding: 5px 10px; font-size: 12px;">${uiIcon('square-pen')} Editar</button>` : ''}
-        ${adminUi ? `<button type="button" class="btn-danger btn-icon-only" onclick="eliminarPedido(${index})" title="Eliminar pedido" aria-label="Eliminar pedido">${uiIcon('x')}</button>` : ''}
       </div>
     </div>
     <div class="pedido-cliente">${escapeHtmlTexto(String(pedido.nombre || '').trim() || 'No especificado')}</div>
@@ -4728,45 +4728,96 @@ function resumenAsignacionesParaBorrar(lista) {
   );
 }
 
-async function eliminarPedido(index) {
-  if (sesionUsuario && !esSesionAdmin()) {
-    mostrarToast('Solo un administrador puede eliminar pedidos.', 'warning');
+function quitarPedidoDeLaLista(pedido) {
+  if (!pedido) return;
+  const sid = idAlmacenPedido(pedido);
+  const tid = idTiendaPedido(pedido);
+  const ix = pedidos.findIndex((p) => idAlmacenPedido(p) === sid && idTiendaPedido(p) === tid);
+  if (ix < 0) return;
+  const copia = pedidos[ix];
+  pedidos.splice(ix, 1);
+  guardarPedidos();
+  renderPedidos();
+  actualizarMarcadores();
+  void borrarPedidoEnServidor(copia);
+  void forzarSyncPedidosAhora().catch((e) => console.error(e));
+}
+
+async function borrarPedidoEnServidor(pedido) {
+  if (!pedido || !getAuthToken() || !appEstaOnline()) return;
+  const id = idAlmacenPedido(pedido);
+  if (!id) return;
+  try {
+    await apiJson(`/api/orders/${id}`, { method: 'DELETE' });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function mensajeCancelacionParaTienda(pedido) {
+  const id = pedido && pedido.id != null ? pedido.id : 'N/A';
+  const nombre = String(pedido?.nombre || '').trim() || 'No especificado';
+  const tel = (obtenerTelefonosPedido(pedido) || []).join(' / ') || 'No especificado';
+  const dir = String(pedido?.direccion || '').trim() || 'No especificada';
+  const valor = obtenerValorAReclamarPedido(pedido).toLocaleString('es-CO');
+  const productos = textoProductosEntregaParaSoporte(pedido);
+  return `Pedido #${id} cancelado
+Cliente: ${nombre}
+Teléfono: ${tel}
+Dirección: ${dir}
+Valor: $${valor}
+Producto(s):
+${productos}`;
+}
+
+function cancelarPedidoAvisandoSoloTienda(pedido) {
+  if (!pedido || pedido.cancelado) return;
+  pedido.cancelado = true;
+  pedido.enCurso = false;
+  pedido.llegoDestino = false;
+  pedido.posicionPendiente = null;
+  pedido.pendienteNotificarClientePorteria = false;
+  pedido.pendienteNotificarClienteNoEntregado = false;
+  sellarFechaOperacionPedido(pedido);
+  guardarPedidos();
+  renderPedidos();
+  actualizarMarcadores();
+  void persistirHistorialTrasCierrePedido(pedido);
+  void forzarSyncPedidosAhora().catch((e) => console.error(e));
+
+  const wa = obtenerSoporteWhatsApp(pedido);
+  const mensaje = mensajeCancelacionParaTienda(pedido);
+  if (!wa) {
+    mostrarToast('Pedido cancelado. Esta tienda no tiene número de confirmación.', 'warning', 7000);
     return;
   }
+  abrirWhatsAppPreferirApp(wa, mensaje);
+}
+
+function preguntarEliminarPedido(index) {
   const pedido = pedidos[index];
   if (!pedido) return;
   const idRef = Number(pedido.id);
-  if (!listaMensajerosCache.length) {
-    try {
-      await cargarMensajerosParaAsignacion();
-    } catch (_e) {}
-  }
-  const avisoAsignado = resumenAsignacionesParaBorrar([pedido]);
-  const texto = avisoAsignado
-    ? `¿Eliminar el pedido #${idRef}?\n\n${avisoAsignado}`
-    : `¿Estás seguro de eliminar el pedido #${idRef}?`;
+  const puedeMarcarCancelado = !pedido.cancelado && !pedido.entregado;
   mostrarModalDecision({
-    titulo: 'Eliminar pedido',
-    texto,
-    textoConfirmar: 'Eliminar',
-    textoCancelar: 'Cancelar',
+    titulo: `Pedido #${idRef}`,
+    texto: puedeMarcarCancelado
+      ? '¿Solo quieres eliminar este pedido o se canceló?\n\nSi se canceló, se avisa únicamente a la tienda. El cliente no recibe ningún mensaje.'
+      : `¿Eliminar el pedido #${idRef}?`,
+    textoConfirmar: 'Solo eliminar',
     claseConfirmar: 'btn-danger',
-    mostrarSecundario: false,
-    onConfirmar: () => {
-      const sid = idAlmacenPedido(pedido);
-      const tid = idTiendaPedido(pedido);
-      const ix = pedidos.findIndex(
-        (p) => idAlmacenPedido(p) === sid && idTiendaPedido(p) === tid
-      );
-      if (ix < 0) return;
-      pedidos.splice(ix, 1);
-      guardarPedidos();
-      renderPedidos();
-      actualizarMarcadores();
-      void forzarSyncPedidosAhora().catch((e) => console.error(e));
-    },
-    onCancelar: () => {}
+    textoSecundario: 'Se canceló',
+    claseSecundario: 'btn-warning',
+    mostrarSecundario: puedeMarcarCancelado,
+    textoCancelar: 'Cerrar',
+    onConfirmar: () => quitarPedidoDeLaLista(pedido),
+    onSecundario: () => cancelarPedidoAvisandoSoloTienda(pedido),
+    onCancelar: () => {},
   });
+}
+
+async function eliminarPedido(index) {
+  preguntarEliminarPedido(index);
 }
 
 function marcarEntregado(index) {
