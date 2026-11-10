@@ -1015,14 +1015,14 @@ async function syncPedidosAlServidor() {
       const orders = JSON.parse(JSON.stringify(pedidos || []));
       const orderIndex = orders.map((p) => idAlmacenPedido(p));
       try {
-        if (esSesionAdmin()) {
-          await apiJson('/api/orders', {
-            method: 'PUT',
+  if (esSesionAdmin()) {
+    await apiJson('/api/orders', {
+      method: 'PUT',
             body: JSON.stringify({ orders, orderIndex, clientRevision: revAlEnviar }),
-          });
-        } else {
+    });
+  } else {
           const rutaResp = await apiJson('/api/orders/messenger', {
-            method: 'PUT',
+      method: 'PUT',
             body: JSON.stringify({
               orders,
               orderIndex,
@@ -1038,7 +1038,7 @@ async function syncPedidosAlServidor() {
         if (e && e.code === 'STALE_ORDERS') {
           // Otra sesión ya guardó el catálogo (p. ej. borró pedidos). No reenviar esta lista vieja.
           try {
-            const data = await apiJson('/api/orders', { method: 'GET' });
+  const data = await apiJson('/api/orders', { method: 'GET' });
             aplicarPedidosDesdeServidor(data.orders);
             const srvRev = Number(e.lastRevision || data.clientRevision || 0) || 0;
             if (srvRev > 0) {
@@ -1173,16 +1173,16 @@ function routeNoticeEsNuevo(data) {
 
 function avisarCambioOrdenSiHaceFalta(data) {
   if (!data || !data.routeNotice || !data.routeNotice.at) return;
-  const at = Number(data.routeNotice.at) || 0;
-  const key = `delivery_route_notice_seen_u${sesionUsuario ? sesionUsuario.id : '0'}`;
-  let prev = 0;
-  try { prev = Number(localStorage.getItem(key) || '0') || 0; } catch (_e) { prev = 0; }
-  if (at > prev) {
-    const msg = String(data.routeNotice.message || 'Se modificó el orden de tus pedidos.');
-    mostrarToast(msg, 'info', 9000);
-    try { localStorage.setItem(key, String(at)); } catch (_e) {}
+    const at = Number(data.routeNotice.at) || 0;
+    const key = `delivery_route_notice_seen_u${sesionUsuario ? sesionUsuario.id : '0'}`;
+    let prev = 0;
+    try { prev = Number(localStorage.getItem(key) || '0') || 0; } catch (_e) { prev = 0; }
+    if (at > prev) {
+      const msg = String(data.routeNotice.message || 'Se modificó el orden de tus pedidos.');
+      mostrarToast(msg, 'info', 9000);
+      try { localStorage.setItem(key, String(at)); } catch (_e) {}
+    }
   }
-}
 
 async function refrescarPedidosDesdeApi() {
   if (esSesionAdmin()) {
@@ -1592,14 +1592,14 @@ function mediosPagoVacio() {
 }
 
 function boolConfigNotificacion(valor, predeterminado) {
-  if (typeof valor === 'boolean') return valor;
+      if (typeof valor === 'boolean') return valor;
   if (typeof valor === 'number') return valor !== 0;
-  if (typeof valor === 'string') {
-    const normalizado = valor.trim().toLowerCase();
+      if (typeof valor === 'string') {
+        const normalizado = valor.trim().toLowerCase();
     if (normalizado === 'false' || normalizado === '0') return false;
     if (normalizado === 'true' || normalizado === '1') return true;
-  }
-  return predeterminado;
+      }
+      return predeterminado;
 }
 
 function parsearMediosPagoCliente(cfg) {
@@ -1610,7 +1610,7 @@ function parsearMediosPagoCliente(cfg) {
   if (!numeroNequi && legacyNum) numeroNequi = legacyNum;
   if (!numeroDaviplata && legacyNum) numeroDaviplata = legacyNum;
   const llavePago = String(g.llavePago || '').trim();
-  return {
+    return {
     tieneNequi: boolConfigNotificacion(g.tieneNequi, false) || !!numeroNequi,
     tieneDaviplata: boolConfigNotificacion(g.tieneDaviplata, false) || !!numeroDaviplata,
     numeroNequi,
@@ -2954,29 +2954,29 @@ function extraerCamposPedido(bloque) {
   } else {
     const finValor =
       `(?=Env[ií]o|Horario|Producto|¿Todo|Para agilizar|📍|${_RE_EMOJI_NOMBRE}|📲|💰|https?:|\\n\\s*\\d+:\\s*\\n?\\s*Para|$)`;
-    const valPatrones = [
-      new RegExp(
+  const valPatrones = [
+    new RegExp(
         `(?:Valor\\s+a\\s+pagar|Valor\\s+a\\s+recoger)[^:\\n]*:\\s*([\\s\\S]*?)${finValor}`,
-        'i'
-      ),
+      'i'
+    ),
       new RegExp(`💰(?!\\s*Env[ií]o\\b)[^:\\n]*:\\s*([\\s\\S]*?)${finValor}`, 'iu'),
-    ];
-    for (const re of valPatrones) {
-      const m = b.match(re);
-      if (m && m[1]) {
-        const raw = m[1].trim().split('\n')[0].trim();
+  ];
+  for (const re of valPatrones) {
+    const m = b.match(re);
+    if (m && m[1]) {
+      const raw = m[1].trim().split('\n')[0].trim();
         if (/env[ií]o|pagados|gracias/i.test(raw)) continue;
-        const soloDigitos = raw.replace(/[^\d]/g, '');
-        if (soloDigitos) {
-          valor = soloDigitos;
-          break;
-        }
+      const soloDigitos = raw.replace(/[^\d]/g, '');
+      if (soloDigitos) {
+        valor = soloDigitos;
+        break;
       }
     }
-    if (!valor || valor === '0') {
-      const respaldo = extraerMontoValorRespaldoSinEnvio(b);
-      if (respaldo != null) valor = respaldo;
-    }
+  }
+  if (!valor || valor === '0') {
+    const respaldo = extraerMontoValorRespaldoSinEnvio(b);
+    if (respaldo != null) valor = respaldo;
+  }
   }
 
   // Solo productos entre "Producto" y "¿Todo en orden?"
@@ -3162,22 +3162,22 @@ async function procesarPedido() {
     sincronizarAvisoTelefonoPedido(prev);
     pedidoFinalId = prev.id;
   } else {
-    const baseNuevo = pedidoNuevoBase();
-    if (sesionUsuario) baseNuevo.createdBy = String(sesionUsuario.id);
+  const baseNuevo = pedidoNuevoBase();
+  if (sesionUsuario) baseNuevo.createdBy = String(sesionUsuario.id);
     const nuevoPedido = {
-      id: pedidoId,
-      nombre: campos.nombre,
-      telefono: campos.telefono,
-      telefonos: Array.isArray(campos.telefonos) ? campos.telefonos : [],
-      direccion: campos.direccion,
+    id: pedidoId,
+    nombre: campos.nombre,
+    telefono: campos.telefono,
+    telefonos: Array.isArray(campos.telefonos) ? campos.telefonos : [],
+    direccion: campos.direccion,
       productos: productosLimpios,
       valor: valorLimpio,
       valorOriginal: null,
       valorModificado: false,
-      textoOriginal: texto,
-      mapUrl: mapUrlFinal,
-      coords: coords && coords.lat && coords.lng ? { lat: coords.lat, lng: coords.lng } : null,
-      ...baseNuevo
+    textoOriginal: texto,
+    mapUrl: mapUrlFinal,
+    coords: coords && coords.lat && coords.lng ? { lat: coords.lat, lng: coords.lng } : null,
+    ...baseNuevo
     };
     sincronizarAvisoTelefonoPedido(nuevoPedido);
     pedidos.push(nuevoPedido);
@@ -3902,14 +3902,14 @@ function htmlOpcionesMensajerosSelect(pedido) {
 }
 
 function pintarSelectsMensajerosEnUI() {
-  const bulk = document.getElementById('bulkAssignSelect');
-  if (bulk) {
+    const bulk = document.getElementById('bulkAssignSelect');
+    if (bulk) {
     const prev = bulk.value;
-    bulk.innerHTML =
-      '<option value="">Elegir mensajero…</option>' +
-      listaMensajerosCache
-        .map((m) => `<option value="${m.id}">${escapeHtmlTexto(m.username)}</option>`)
-        .join('');
+      bulk.innerHTML =
+        '<option value="">Elegir mensajero…</option>' +
+        listaMensajerosCache
+          .map((m) => `<option value="${m.id}">${escapeHtmlTexto(m.username)}</option>`)
+          .join('');
     if (prev && [...bulk.options].some((o) => o.value === prev)) bulk.value = prev;
   }
 }
@@ -3927,10 +3927,10 @@ async function cargarMensajerosParaAsignacion() {
       pintarSelectsMensajerosEnUI();
       if (habiaSelectsVacios && listaMensajerosCache.length) renderPedidos();
       return;
-    } catch (e) {
+  } catch (e) {
       ultimoError = e;
       await new Promise((r) => setTimeout(r, 400 * (intento + 1)));
-    }
+  }
   }
   if (ultimoError) console.error(ultimoError);
 }
@@ -4256,13 +4256,13 @@ function renderListaOrdenEntrega() {
             marcarRegresarAEnRuta(idxGlobal);
           });
         } else {
-          bPend.title = 'Regresar pedido a pendientes';
-          bPend.setAttribute('aria-label', 'Regresar pedido a pendientes');
-          bPend.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            ev.preventDefault();
-            marcarPendiente(idxGlobal);
-          });
+        bPend.title = 'Regresar pedido a pendientes';
+        bPend.setAttribute('aria-label', 'Regresar pedido a pendientes');
+        bPend.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          ev.preventDefault();
+          marcarPendiente(idxGlobal);
+        });
         }
         bPend.innerHTML = uiIcon('rotate-ccw');
         acciones.appendChild(bPend);
@@ -5498,7 +5498,7 @@ function confirmarMensajeSoportePersonalizado() {
   const wa = obtenerSoporteWhatsApp(pedido);
   void copiarTextoAlPortapapeles(mensaje, 'Mensaje copiado. Pégalo en el chat de WhatsApp.').then((copiado) => {
     if (copiado) abrirWhatsAppChat(wa);
-    cerrarModalMensajeSoporte();
+  cerrarModalMensajeSoporte();
   });
 }
 
@@ -6601,7 +6601,7 @@ async function registrarEntregaConPago(index, pedidoId, datosPago) {
   void persistirHistorialTrasCierrePedido(pedido);
   // Diferir el modal del siguiente pedido para no cancelar la apertura de WhatsApp en móvil.
   window.setTimeout(() => {
-    notificarSiguientePedido(pedidoId);
+  notificarSiguientePedido(pedidoId);
   }, 700);
 }
 
@@ -6797,11 +6797,11 @@ function asegurarModalNoEntregado() {
       </button>
       <h3>No entregado</h3>
       <div id="pasoNoEntregadoUbicacion" style="display:block;">
-        <p>Indica si estuviste en el punto de entrega (afecta el pago de $12.000 al delivery):</p>
-        <div class="modal-no-entregado-actions">
-          <button class="btn-warning" onclick="confirmarNoEntregado(true)">Estoy en el punto de entrega</button>
-          <button class="btn-info" onclick="confirmarNoEntregado(false)">No fui al punto de entrega</button>
-        </div>
+      <p>Indica si estuviste en el punto de entrega (afecta el pago de $12.000 al delivery):</p>
+      <div class="modal-no-entregado-actions">
+        <button class="btn-warning" onclick="confirmarNoEntregado(true)">Estoy en el punto de entrega</button>
+        <button class="btn-info" onclick="confirmarNoEntregado(false)">No fui al punto de entrega</button>
+      </div>
       </div>
       <div id="pasoNoEntregadoMotivo" style="display:none;">
         <p id="noEntregadoUbicacionResumen" class="config-notificacion-ayuda"></p>
@@ -6982,8 +6982,8 @@ function obtenerEtapaPedidoUI(pedido) {
   if (pedido.cancelado) return 'cancelado';
   if (pedido.entregado) return 'finalizado';
   if (pedido.enCurso) {
-    if (!pedido.llegoDestino) return 'enRuta';
-    return 'enDestino';
+  if (!pedido.llegoDestino) return 'enRuta';
+  return 'enDestino';
   }
   return 'notificar';
 }
@@ -7486,13 +7486,13 @@ function ofrecerSegundoTelefonoTrasNotificacionSiPendiente() {
   const idx = indexActual >= 0 ? indexActual : Number(pend.indexFinal) || 0;
   const otro = pendientes[0];
   const mensaje = construirMensajeNotificarEnCamino(pedido);
-  mostrarModalDecision({
+    mostrarModalDecision({
     titulo: 'Notificar al segundo número',
     texto: `El pedido #${pedido.id} tiene otro celular: ${otro}.\nSe enviará la misma notificación.`,
     textoConfirmar: 'Notificar',
-    claseConfirmar: 'btn-notify',
-    mostrarSecundario: false,
-    textoCancelar: 'Cerrar',
+      claseConfirmar: 'btn-notify',
+      mostrarSecundario: false,
+      textoCancelar: 'Cerrar',
     onConfirmar: () => {
       persistirNotificacionEnCaminoAntesDeWhatsApp(pedido, otro);
       limpiarEsperaSegundoTelTrasNotificacion();
@@ -7523,13 +7523,13 @@ function limpiarEsperaEnrutarTrasNotificacion() {
 function mostrarModalEnrutarTrasNotificacion(indexFinal, pedidoId, opciones) {
   if (opciones && opciones.abrirEnrutarDespues === false) return;
   if (!opciones || !opciones.abrirEnrutarDespues) return;
-  mostrarModalDecision({
-    titulo: 'Enrutar ahora',
-    texto: `Pedido #${pedidoId} notificado.\n¿Quieres enrutar ahora?`,
-    textoConfirmar: 'Enrutar',
-    claseConfirmar: 'btn-route',
-    mostrarSecundario: false,
-    textoCancelar: 'Cerrar',
+      mostrarModalDecision({
+        titulo: 'Enrutar ahora',
+        texto: `Pedido #${pedidoId} notificado.\n¿Quieres enrutar ahora?`,
+        textoConfirmar: 'Enrutar',
+        claseConfirmar: 'btn-route',
+        mostrarSecundario: false,
+        textoCancelar: 'Cerrar',
     onConfirmar: () => {
       limpiarEsperaEnrutarTrasNotificacion();
       enrutarConApps(indexFinal, pedidoId);
@@ -7601,15 +7601,15 @@ function ofrecerNotificarSegundoTelefono(indexFinal, pedidoId, pedidoFinal, opci
     return;
   }
   const otro = pendientes[0];
-  mostrarModalDecision({
+      mostrarModalDecision({
     titulo: 'Notificar al segundo número',
     texto: `Ya notificaste un número del pedido #${pedidoId}.\n¿Quieres notificar también al ${otro}?`,
-    textoConfirmar: 'Sí, notificar',
-    claseConfirmar: 'btn-notify',
+        textoConfirmar: 'Sí, notificar',
+        claseConfirmar: 'btn-notify',
     textoSecundario: 'No, continuar',
-    claseSecundario: 'btn-info',
-    mostrarCancelar: false,
-    onConfirmar: () => {
+        claseSecundario: 'btn-info',
+        mostrarCancelar: false,
+        onConfirmar: () => {
       persistirNotificacionEnCaminoAntesDeWhatsApp(pedidoFinal, otro);
       if (opciones && opciones.abrirEnrutarDespues) {
         programarEnrutarTrasNotificacion(indexFinal, pedidoId);
@@ -7618,9 +7618,9 @@ function ofrecerNotificarSegundoTelefono(indexFinal, pedidoId, pedidoFinal, opci
       finalizarFlujoNotificacionEnCamino(indexFinal, pedidoId, pedidoFinal, opciones);
     },
     onSecundario: () => finalizarFlujoNotificacionEnCamino(indexFinal, pedidoId, pedidoFinal, opciones),
-    onCancelar: () => {}
-  });
-}
+              onCancelar: () => {}
+            });
+          }
 
 function continuarFlujoNotificacionEnCaminoTrasUno(indexFinal, pedidoId, pedidoFinal, opciones, mensaje) {
   const todos = obtenerTelefonosPedido(pedidoFinal);
@@ -7656,8 +7656,8 @@ function ejecutarNotificacionEnCaminoParcial(indexFinal, pedidoId, pedidoFinal, 
         finalizarFlujoNotificacionEnCamino(indexFinal, pedidoId, pedidoFinal, opciones);
       },
       onSecundario: () => finalizarFlujoNotificacionEnCamino(indexFinal, pedidoId, pedidoFinal, opciones),
-      onCancelar: () => {}
-    });
+        onCancelar: () => {}
+      });
     return;
   }
   seleccionarTelefonoConModal(pendientes, 'Notificación', (telElegido) => {
@@ -9056,55 +9056,67 @@ function cargarPedidosDesdeLocalStorage() {
 
 let authHayUsuarios = false;
 
-async function iniciarApp() {
-  if (!sesionUsuario) return;
-  aplicarVisibilidadPorRol();
-  if (appEstaOnline()) {
-    try {
-      await cargarTiendasDesdeApi();
-    } catch (e) {
-      console.error(e);
-    }
-  }
-  actualizarTextoCabeceraUsuario();
-  exponerDebugAppDelivery();
-  actualizarBannerOffline();
-  configurarFlushSyncPedidosAlSalir();
-  configurarRefrescoPedidosMensajero();
+function pintarOperacionDesdeLocal() {
   cargarCatalogoTiendasLocal();
+  cargarPaymentConfigLocal();
+  cargarPedidosDesdeLocalStorage();
+  actualizarTextoCabeceraUsuario();
+  renderPedidos();
+  if (!mapa) void initMap();
+  else actualizarMarcadores({ conservarVista: true });
+}
 
-  if (!appEstaOnline()) {
-    cargarPedidosDesdeLocalStorage();
-    if (pedidos.length > 0) {
-      mostrarToast('Sin internet: mostrando pedidos guardados en este dispositivo.', 'info', 7000);
-    } else {
-      mostrarToast('Sin internet y no hay pedidos guardados aún. Conéctate una vez para cargarlos.', 'warning', 9000);
-    }
-  } else {
-    // Siempre partir del cache local: si hubo cambios sin sync (p. ej. recarga rápida),
-    // primero se suben y se conservan; no se pisan con el servidor.
-    cargarPedidosDesdeLocalStorage();
-    try {
-      await refrescarPedidosDesdeApi();
-    } catch (e) {
-      console.error(e);
-      if (pedidos.length === 0) cargarPedidosDesdeLocalStorage();
-      const hayLocal = pedidos.length > 0;
+async function sincronizarOperacionEnSegundoPlano() {
+  if (!sesionUsuario || !appEstaOnline()) return;
+  const firma = firmaPedidosParaRefresco();
+  const tiendaAntes = String(tiendaActivaId || '');
+  try {
+    await cargarTiendasDesdeApi();
+  } catch (e) {
+    console.error(e);
+  }
+  try {
+    await refrescarPedidosDesdeApi();
+  } catch (e) {
+    console.error(e);
+    if (pedidos.length === 0) {
       mostrarToast(
-        hayLocal
-          ? `No se pudo sincronizar con el servidor. Mostrando ${pedidos.length} pedido(s) guardado(s) aquí.`
-          : `No se pudieron cargar los pedidos del servidor: ${String(e.message || e)}`,
-        hayLocal ? 'warning' : 'error',
+        `No se pudieron cargar los pedidos del servidor: ${String(e.message || e)}`,
+        'error',
         9000
       );
     }
   }
-  if (esSesionAdmin() && appEstaOnline()) {
+  if (esSesionAdmin()) {
     try {
       await cargarMensajerosParaAsignacion();
     } catch (e) {
       console.error(e);
     }
+  }
+  try {
+    await refrescarPaymentConfigDesdeServidor();
+  } catch (e) {
+    console.error(e);
+  }
+  const cambioDatos =
+    firma !== firmaPedidosParaRefresco() || tiendaAntes !== String(tiendaActivaId || '');
+  if (cambioDatos || esSesionAdmin()) {
+    renderPedidos();
+    actualizarMarcadores({ conservarVista: true });
+  }
+}
+
+async function iniciarApp() {
+  if (!sesionUsuario) return;
+  aplicarVisibilidadPorRol();
+  exponerDebugAppDelivery();
+  actualizarBannerOffline();
+  configurarFlushSyncPedidosAlSalir();
+  configurarRefrescoPedidosMensajero();
+  pintarOperacionDesdeLocal();
+  if (!appEstaOnline() && pedidos.length === 0) {
+    mostrarToast('Sin internet y no hay pedidos guardados aún. Conéctate una vez para cargarlos.', 'warning', 9000);
   }
   aplicarVisibilidadPorRol();
 
@@ -9132,7 +9144,6 @@ async function iniciarApp() {
     });
   }
 
-  renderPedidos();
   window.setTimeout(() => {
     try {
       if (!ofrecerSegundoTelefonoTrasNotificacionSiPendiente()) {
@@ -9140,18 +9151,7 @@ async function iniciarApp() {
       }
     } catch (_e) {}
   }, 400);
-  requestAnimationFrame(() => {
-    try {
-      if (!mapa) initMap();
-      else {
-        mapaAjustado = false;
-        actualizarMarcadores();
-        ajustarMapaConReintentos();
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  });
+  void sincronizarOperacionEnSegundoPlano();
   try {
     await restaurarVistaAppSesionTrasInicio();
   } catch (e) {
@@ -9213,16 +9213,7 @@ async function entrarAppConSesion(user) {
   if (main) main.style.display = '';
   actualizarTextoCabeceraUsuario();
   aplicarVisibilidadPorRol();
-  if (appEstaOnline()) {
-    try {
-      await refrescarPaymentConfigDesdeServidor();
-    } catch (e) {
-      console.error(e);
-      cargarPaymentConfigLocal();
-    }
-  } else {
-    cargarPaymentConfigLocal();
-  }
+  cargarPaymentConfigLocal();
   await iniciarApp();
 }
 
@@ -10766,29 +10757,18 @@ async function iniciarFlujoAuth() {
   /* Con sesión guardada: validar antes de mostrar login (evita parpadeo al recargar).
      Nunca borrar el token aquí: la sesión solo se cierra con el botón Salir. */
   if (token && !enVistaResetUrl) {
+    const entroLocal = await entrarConSesionLocalSiHayToken(token);
+    if (entroLocal) {
+      void validarSesionEnSegundoPlano(token);
+      return;
+    }
     try {
       const me = await apiJson('/api/me', { method: 'GET' });
-      const tabId = getAuthTabUserId();
-      if (tabId && String(me.user.id) !== String(tabId)) {
-        const entroLocal = await entrarConSesionLocalSiHayToken(token);
-        if (entroLocal) return;
-      }
       migrarTokenLegacySiHaceFalta(me.user.id);
       setAuthToken(token, me.user.id);
       await entrarAppConSesion(me.user);
       return;
     } catch (_e) {
-      const entroLocal = await entrarConSesionLocalSiHayToken(token);
-      if (entroLocal) {
-        mostrarToast(
-          appEstaOnline()
-            ? 'No se pudo validar la sesión en el servidor. Usando datos guardados.'
-            : 'Sin internet: entrando con la sesión y pedidos guardados en este dispositivo.',
-          'warning',
-          8000
-        );
-        return;
-      }
       /* Token presente pero ilegible: no limpiar; mostrar login y reintentar luego. */
     }
   }
@@ -10874,6 +10854,26 @@ async function iniciarFlujoAuth() {
   }
 }
 
+async function validarSesionEnSegundoPlano(token) {
+  if (!token || !appEstaOnline()) return;
+  try {
+    const me = await apiJson('/api/me', { method: 'GET' });
+    if (!me || !me.user) return;
+    const tabId = getAuthTabUserId();
+    if (tabId && String(me.user.id) !== String(tabId)) return;
+    migrarTokenLegacySiHaceFalta(me.user.id);
+    setAuthToken(token, me.user.id);
+    if (sesionUsuario && String(sesionUsuario.id) === String(me.user.id)) {
+      sesionUsuario = { ...sesionUsuario, ...me.user };
+      guardarSesionUsuarioCache(sesionUsuario);
+      actualizarTextoCabeceraUsuario();
+      aplicarVisibilidadPorRol();
+      return;
+    }
+    if (!sesionUsuario) await entrarAppConSesion(me.user);
+  } catch (_e) {}
+}
+
 function sincronizarSesionDesdeOtraPestana() {
   if (!sesionUsuario) return;
   const token = getAuthToken();
@@ -10884,6 +10884,7 @@ function sincronizarSesionDesdeOtraPestana() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  void cargarLeaflet().catch(() => {});
   configurarSoporteOfflineApp();
   configurarRetornoNotificarClientePorteria();
   window.addEventListener('storage', (ev) => {
