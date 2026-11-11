@@ -192,9 +192,20 @@ async function consumePasswordResetToken(token) {
 }
 
 async function getAllOrdersRows() {
-  const { data, error } = await supabase.from(T.orders).select('id, payload');
-  if (error) throw error;
-  return (data || []).map((o) => ({
+  const pageSize = 1000;
+  const all = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from(T.orders)
+      .select('id, payload')
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = data || [];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return all.map((o) => ({
     id: Number(o.id),
     payload: typeof o.payload === 'string' ? o.payload : JSON.stringify(o.payload),
   }));

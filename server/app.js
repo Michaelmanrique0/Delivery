@@ -332,17 +332,11 @@ async function buildOrdersResponseForUser(user, extra = {}) {
     return { orders: ordered, orderIndex: ordered.map((p) => idAlmacenPedidoServidor(p)), ...extra };
   }
 
-  const indexSet = new Set(
-    orderIndex.map((id) => Number(id)).filter((id) => Number.isFinite(id))
-  );
   const mine = [];
   for (const row of rows) {
     const p = pedidoDesdeFila(row);
     if (!p) continue;
-    const almacen = Number(row.id);
     if (String(p.assignedTo || '') !== String(user.id)) continue;
-    // Si el admin ya lo quitó de la lista, no debe seguir en el repartidor.
-    if (indexSet.size > 0 && !indexSet.has(almacen) && !indexSet.has(Number(p.id))) continue;
     mine.push(p);
   }
   const byMine = new Map(mine.map((p) => [idAlmacenPedidoServidor(p), p]));
@@ -1739,7 +1733,27 @@ app.patch(
       return;
     }
     const filtered = routeIds.map((x) => Number(x)).filter((x) => Number.isFinite(x));
-    await escribirRutaMensajero(userId, filtered);
+    const mine = await idsAsignadosMensajero(userId);
+    const incoming = filtered.filter((id) => mine.has(id));
+    const prev = await leerRutaMensajero(userId);
+    const merged = [];
+    const seen = new Set();
+    for (const id of incoming) {
+      if (seen.has(id)) continue;
+      merged.push(id);
+      seen.add(id);
+    }
+    for (const id of prev) {
+      if (!mine.has(id) || seen.has(id)) continue;
+      merged.push(id);
+      seen.add(id);
+    }
+    for (const id of mine) {
+      if (seen.has(id)) continue;
+      merged.push(id);
+      seen.add(id);
+    }
+    await escribirRutaMensajero(userId, merged);
     const prevRev = await leerRutaRevMensajero(userId);
     await escribirRutaRevMensajero(userId, prevRev + 1);
 
@@ -1749,7 +1763,7 @@ app.patch(
       message: String(req.body?.message || 'Un administrador modificó el orden de tus pedidos.'),
     };
     await setMeta(`route_notice_u${userId}`, JSON.stringify(notice));
-    res.json({ ok: true, userId: String(userId), count: filtered.length });
+    res.json({ ok: true, userId: String(userId), count: merged.length });
   })
 );
 
