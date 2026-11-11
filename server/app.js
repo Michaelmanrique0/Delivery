@@ -244,32 +244,56 @@ async function idsAsignadosMensajero(uid) {
   return mine;
 }
 
+async function listarAsignadosMensajero(uid) {
+  const rows = await getAllOrdersRows();
+  const out = [];
+  for (const row of rows) {
+    const p = pedidoDesdeFila(row);
+    if (!p) continue;
+    if (String(p.assignedTo || '') !== String(uid)) continue;
+    const rowId = Number(row.id);
+    if (!Number.isFinite(rowId) || rowId <= 0) continue;
+    out.push({ rowId, pedido: p });
+  }
+  return out;
+}
+
+function resolverFilaAsignada(asignados, raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  const porAlmacen = asignados.filter((a) => a.rowId === n || Number(a.pedido.storageId) === n);
+  if (porAlmacen.length >= 1) return porAlmacen[0].rowId;
+  const porNumero = asignados.filter((a) => Number(a.pedido.id) === n);
+  if (porNumero.length === 1) return porNumero[0].rowId;
+  return null;
+}
+
+function clavePedidoServidor(p) {
+  const id = Number(p && p.id);
+  if (!Number.isFinite(id) || id <= 0) return '';
+  const tid = String((p && p.tiendaId) || '').trim() || 'principal';
+  return `${tid}::${id}`;
+}
+
 /**
  * Conserva el orden que ya tiene el mensajero.
- * Los pedidos recién asignados (o que faltan en su ruta) se agregan al final,
- * en el mismo orden que tiene el administrador.
+ * Los pedidos recién asignados se agregan al final, sin repetir el mismo pedido.
  */
 async function sincronizarRutaMensajeroConservandoOrden(uid) {
-  const mine = await idsAsignadosMensajero(uid);
+  const asignados = await listarAsignadosMensajero(uid);
   const adminOrder = await leerOrderIndexAdmin();
   const prev = await leerRutaMensajero(uid);
   const route = [];
   const seen = new Set();
-  for (const id of prev) {
-    if (!mine.has(id) || seen.has(id)) continue;
-    route.push(id);
+  const push = (raw) => {
+    const id = resolverFilaAsignada(asignados, raw);
+    if (id == null || seen.has(id)) return;
     seen.add(id);
-  }
-  for (const id of adminOrder) {
-    if (!mine.has(id) || seen.has(id)) continue;
     route.push(id);
-    seen.add(id);
-  }
-  for (const id of mine) {
-    if (seen.has(id)) continue;
-    route.push(id);
-    seen.add(id);
-  }
+  };
+  for (const id of prev) push(id);
+  for (const id of adminOrder) push(id);
+  for (const item of asignados) push(item.rowId);
   await escribirRutaMensajero(uid, route);
   return route;
 }
@@ -332,50 +356,26 @@ async function buildOrdersResponseForUser(user, extra = {}) {
     return { orders: ordered, orderIndex: ordered.map((p) => idAlmacenPedidoServidor(p)), ...extra };
   }
 
-  const mine = [];
-  for (const row of rows) {
-    const p = pedidoDesdeFila(row);
-    if (!p) continue;
-    if (String(p.assignedTo || '') !== String(user.id)) continue;
-    mine.push(p);
-  }
-  const byMine = new Map(mine.map((p) => [idAlmacenPedidoServidor(p), p]));
-
-  const routeKey = `route_u${user.id}`;
-  let routeIds = [];
-  try {
-    routeIds = JSON.parse((await getMeta(routeKey)) || '[]');
-  } catch (_e) {
-    routeIds = [];
-  }
-  if (!Array.isArray(routeIds)) routeIds = [];
+  const asignados = await listarAsignadosMensajero(user.id);
+  const byRow = new Map(asignados.map((item) => [item.rowId, item.pedido]));
+  const routeIds = await leerRutaMensajero(user.id);
 
   const ordered = [];
-  const seen = new Set();
-  for (const rawId of routeIds) {
-    const id = Number(rawId);
-    if (!Number.isFinite(id)) continue;
-    const p = byMine.get(id);
-    if (p) {
-      ordered.push(p);
-      seen.add(id);
-    }
-  }
-  // Si el mensajero aún no tiene ruta guardada (o faltan ids), respeta el orden del admin (order_index).
-  for (const rawId of orderIndex) {
-    const id = Number(rawId);
-    if (!Number.isFinite(id)) continue;
-    if (seen.has(id)) continue;
-    const p = byMine.get(id);
-    if (p) {
-      ordered.push(p);
-      seen.add(id);
-    }
-  }
-  for (const p of mine) {
-    const id = idAlmacenPedidoServidor(p);
-    if (!seen.has(id)) ordered.push(p);
-  }
+  const seenRow = new Set();
+  const seenClave = new Set();
+  const pushPedido = (rowId) => {
+    if (rowId == null || seenRow.has(rowId)) return;
+    const p = byRow.get(rowId);
+    if (!p) return;
+    const clave = clavePedidoServidor(p);
+    if (!clave || seenClave.has(clave)) return;
+    seenRow.add(rowId);
+    seenClave.add(clave);
+    ordered.push(p);
+  };
+  for (const rawId of routeIds) pushPedido(resolverFilaAsignada(asignados, rawId));
+  for (const rawId of orderIndex) pushPedido(resolverFilaAsignada(asignados, rawId));
+  for (const item of asignados) pushPedido(item.rowId);
 
   let routeNotice = null;
   try {
@@ -1733,25 +1733,50 @@ app.patch(
       return;
     }
     const filtered = routeIds.map((x) => Number(x)).filter((x) => Number.isFinite(x));
-    const mine = await idsAsignadosMensajero(userId);
-    const incoming = filtered.filter((id) => mine.has(id));
-    const prev = await leerRutaMensajero(userId);
+    const asignados = await listarAsignadosMensajero(userId);
+    const incoming = [];
+    const seenIncoming = new Set();
+    for (const raw of filtered) {
+      const id = resolverFilaAsignada(asignados, raw);
+      if (id == null || seenIncoming.has(id)) continue;
+      seenIncoming.add(id);
+      incoming.push(id);
+    }
+    const prev = [];
+    const seenPrev = new Set();
+    for (const raw of await leerRutaMensajero(userId)) {
+      const id = resolverFilaAsignada(asignados, raw);
+      if (id == null || seenPrev.has(id)) continue;
+      seenPrev.add(id);
+      prev.push(id);
+    }
+    const incomingSet = new Set(incoming);
+    const existentes = incoming.filter((id) => seenPrev.has(id));
+    const nuevos = incoming.filter((id) => !seenPrev.has(id));
     const merged = [];
     const seen = new Set();
-    for (const id of incoming) {
-      if (seen.has(id)) continue;
-      merged.push(id);
-      seen.add(id);
-    }
+    let cursor = 0;
     for (const id of prev) {
-      if (!mine.has(id) || seen.has(id)) continue;
-      merged.push(id);
-      seen.add(id);
+      if (incomingSet.has(id)) {
+        const next = existentes[cursor++];
+        if (next != null && !seen.has(next)) {
+          merged.push(next);
+          seen.add(next);
+        }
+      } else if (!seen.has(id)) {
+        merged.push(id);
+        seen.add(id);
+      }
     }
-    for (const id of mine) {
+    for (const id of nuevos) {
       if (seen.has(id)) continue;
       merged.push(id);
       seen.add(id);
+    }
+    for (const item of asignados) {
+      if (seen.has(item.rowId)) continue;
+      merged.push(item.rowId);
+      seen.add(item.rowId);
     }
     await escribirRutaMensajero(userId, merged);
     const prevRev = await leerRutaRevMensajero(userId);

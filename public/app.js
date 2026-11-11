@@ -82,7 +82,6 @@ function idTiendaPedido(pedido) {
 }
 
 function pedidosDeTiendaActiva() {
-  if (esSesionMensajero()) return pedidos.filter((p) => p);
   const tid = String(tiendaActivaId || TIENDA_DEFAULT_ID);
   return pedidos.filter((p) => idTiendaPedido(p) === tid);
 }
@@ -4153,7 +4152,7 @@ function crearTarjetaPedido(pedido, index) {
   div.innerHTML = `
     <button type="button" class="btn-danger btn-icon-only pedido-btn-cerrar" onclick="event.preventDefault(); event.stopPropagation(); preguntarEliminarPedido(${index})" title="Quitar pedido" aria-label="Quitar pedido">${uiIcon('x')}</button>
     <div class="pedido-header">
-      <div class="pedido-numero">Pedido #${pedido.id}${estadoTexto}${esSesionMensajero() ? ` · ${escapeHtmlTexto(nombreTiendaDePedido(pedido))}` : ''}</div>
+      <div class="pedido-numero">Pedido #${pedido.id}${estadoTexto}</div>
       <div class="pedido-header-btns">
         ${adminUi && !pedido.cancelado ? `<button type="button" class="btn-edit" onclick="event.preventDefault(); event.stopPropagation(); editarPedido(${index})" style="padding: 5px 10px; font-size: 12px;">${uiIcon('square-pen')} Editar</button>` : ''}
       </div>
@@ -9645,7 +9644,7 @@ function etiquetaEstadoPedidoResumida(p) {
 
 function pedidosAsignadosAMensajero(userId) {
   const key = String(userId ?? '');
-  return pedidos.filter((p) => String(p.assignedTo || '') === key);
+  return pedidosDeTiendaActiva().filter((p) => String(p.assignedTo || '') === key);
 }
 
 function htmlPedidosAsignadosLista(asignados) {
@@ -9657,8 +9656,7 @@ function htmlPedidosAsignadosLista(asignados) {
     const val = formatearDigitosMilesEsCo(String(pedido.valor || '0'));
     const nombre = escapeHtmlTexto(String(pedido.nombre || 'Sin nombre'));
     const estado = escapeHtmlTexto(etiquetaEstadoPedidoResumida(pedido));
-    const tienda = escapeHtmlTexto(nombreTiendaDePedido(pedido));
-    lis += `<li><span class="usuarios-roles-pedido-id">#${escapeHtmlTexto(String(pedido.id))}</span> <span class="usuarios-roles-pedido-nombre">${nombre}</span> <span class="usuarios-roles-pedido-meta">${tienda} · ${estado} · $${escapeHtmlTexto(val)}</span></li>`;
+    lis += `<li><span class="usuarios-roles-pedido-id">#${escapeHtmlTexto(String(pedido.id))}</span> <span class="usuarios-roles-pedido-nombre">${nombre}</span> <span class="usuarios-roles-pedido-meta">${estado} · $${escapeHtmlTexto(val)}</span></li>`;
   }
   return `<ul class="usuarios-roles-pedidos-lista">${lis}</ul>`;
 }
@@ -9693,7 +9691,7 @@ function renderPanelAsignacionesMensajeros() {
       return;
     }
     const porAsignado = new Map();
-    for (const p of pedidos) {
+    for (const p of pedidosDeTiendaActiva()) {
       const k = uidPedidoAsignado(p);
       if (!porAsignado.has(k)) porAsignado.set(k, []);
       porAsignado.get(k).push(p);
@@ -9727,12 +9725,12 @@ function renderPanelAsignacionesMensajeros() {
 
   const idsEnLista = new Set(listaMensajerosCache.map((x) => String(x.id)));
   const idsOrfanos = new Set();
-  for (const p of pedidos) {
+  for (const p of pedidosDeTiendaActiva()) {
     const a = uidPedidoAsignado(p);
     if (a && !idsEnLista.has(a)) idsOrfanos.add(a);
   }
   for (const orphanId of [...idsOrfanos].sort((x, y) => x.localeCompare(y, undefined, { numeric: true }))) {
-    const subset = pedidos.filter((p) => uidPedidoAsignado(p) === orphanId);
+    const subset = pedidosDeTiendaActiva().filter((p) => uidPedidoAsignado(p) === orphanId);
     chunks.push(htmlCardPedidosYPagosMensajero(`Mensajero (id ${orphanId})`, subset));
   }
 
