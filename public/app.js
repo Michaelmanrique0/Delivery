@@ -878,7 +878,7 @@ function flushSyncPedidosAlSalir() {
     clearTimeout(syncRemotoTimer);
     syncRemotoTimer = null;
   }
-  if (!sesionUsuario || !appEstaOnline() || !hayPedidosSyncPendiente()) return;
+  if (!sesionUsuario || !appEstaOnline() || !hayPedidosSyncPendiente() || !edicionPedidosEnEstaSesion) return;
   try {
     const token = getAuthToken();
     if (!token || !esSesionAdmin()) {
@@ -891,6 +891,7 @@ function flushSyncPedidosAlSalir() {
       orders,
       orderIndex: orders.map((p) => idAlmacenPedido(p)),
       clientRevision: revEnviada,
+      clientUpdatedAt: leerEdicionLocalPedidos(),
     });
     void fetch('/api/orders', {
       method: 'PUT',
@@ -1018,7 +1019,12 @@ async function syncPedidosAlServidor() {
   if (esSesionAdmin()) {
     await apiJson('/api/orders', {
       method: 'PUT',
-            body: JSON.stringify({ orders, orderIndex, clientRevision: revAlEnviar }),
+            body: JSON.stringify({
+              orders,
+              orderIndex,
+              clientRevision: revAlEnviar,
+              clientUpdatedAt: leerEdicionLocalPedidos(),
+            }),
     });
   } else {
           const rutaResp = await apiJson('/api/orders/messenger', {
@@ -1186,12 +1192,13 @@ function avisarCambioOrdenSiHaceFalta(data) {
 
 async function refrescarPedidosDesdeApi() {
   if (esSesionAdmin()) {
-    if (hayPedidosSyncPendiente()) {
+    const data = await apiJson('/api/orders', { method: 'GET' });
+    const serverAt = Number(data.updatedAt) || 0;
+    const localAt = leerEdicionLocalPedidos();
+    if (edicionPedidosEnEstaSesion && hayPedidosSyncPendiente() && localAt > serverAt) {
       await syncPedidosAlServidor();
       if (hayPedidosSyncPendiente()) return;
     }
-    const data = await apiJson('/api/orders', { method: 'GET' });
-    if (hayPedidosSyncPendiente()) return;
     aplicarPedidosDesdeServidor(data.orders);
     const serverRev = Number(data.clientRevision || 0) || 0;
     if (serverRev > 0) {
@@ -1203,26 +1210,23 @@ async function refrescarPedidosDesdeApi() {
         } catch (_e) {}
       }
     }
-    marcarPedidosSyncPendiente(false);
+    if (!edicionPedidosEnEstaSesion || localAt <= serverAt) marcarPedidosSyncPendiente(false);
     avisarCambioOrdenSiHaceFalta(data);
     return;
   }
 
-  // Mensajero: el orden oficial de la ruta está en el servidor (PC y celular deben coincidir).
-  // Si hay un reorden local más nuevo que aún no se subió, se conserva y lo nuevo va al final.
   const data = await apiJson('/api/orders', { method: 'GET' });
   const delServidor = deduplicarPedidosPorId(
     (Array.isArray(data.orders) ? data.orders : []).map(normalizarPedidoEnMemoria)
   );
   const serverRutaRev = Math.max(0, Math.floor(Number(data.routeRevision || 0) || 0));
   const localRutaRev = rutaLocalRev || cargarRutaLocalRev();
-  const reordenLocalMasNuevo =
-    (hayPedidosSyncPendiente() || syncPedidosEnCurso) && localRutaRev > serverRutaRev;
-  if (reordenLocalMasNuevo || hayPedidosSyncPendiente() || syncPedidosEnCurso) {
-    fijarPedidosEnMemoria(fusionarPedidosMensajeroConservandoOrden(delServidor, true));
+  const conservarLocal = edicionPedidosEnEstaSesion && localRutaRev > serverRutaRev;
+  fijarPedidosEnMemoria(fusionarPedidosMensajeroConservandoOrden(delServidor, conservarLocal));
+  if (conservarLocal && hayPedidosSyncPendiente()) {
+    await syncPedidosAlServidor();
     return;
   }
-  aplicarPedidosDesdeServidor(delServidor);
   guardarRutaLocalRev(Math.max(localRutaRev, serverRutaRev));
   marcarPedidosSyncPendiente(false);
   avisarCambioOrdenSiHaceFalta(data);
@@ -3381,10 +3385,35 @@ async function procesarMultiplesPedidos(texto) {
   }
 }
 
+let edicionPedidosEnEstaSesion = false;
+
+function claveEdicionLocalPedidos() {
+  const uid = sesionUsuario?.id || getAuthActiveUserId() || '0';
+  return `deliveryPedidosEditadosEn_v1_${uid}`;
+}
+
+function marcarEdicionLocalPedidos() {
+  edicionPedidosEnEstaSesion = true;
+  const ahora = Date.now();
+  try {
+    localStorage.setItem(claveEdicionLocalPedidos(), String(ahora));
+  } catch (_e) {}
+  return ahora;
+}
+
+function leerEdicionLocalPedidos() {
+  try {
+    return Number(localStorage.getItem(claveEdicionLocalPedidos()) || '0') || 0;
+  } catch (_e) {
+    return 0;
+  }
+}
+
 function guardarPedidos() {
   pedidos = deduplicarPedidosPorId(pedidos);
   guardarCachePedidos();
   if (!sesionUsuario) return;
+  marcarEdicionLocalPedidos();
   bumpPedidosLocalRev();
   if (esSesionMensajero()) bumpRutaLocalRev();
   marcarPedidosSyncPendiente(true);
@@ -9218,14 +9247,13 @@ async function iniciarApp() {
 async function cerrarSesionApp() {
   cerrarMenuUsuario();
   try {
-    if (sesionUsuario && esSesionAdmin() && appEstaOnline()) {
-      if (syncRemotoTimer) {
-        clearTimeout(syncRemotoTimer);
-        syncRemotoTimer = null;
+      if (sesionUsuario && esSesionAdmin() && appEstaOnline() && edicionPedidosEnEstaSesion && hayPedidosSyncPendiente()) {
+        if (syncRemotoTimer) {
+          clearTimeout(syncRemotoTimer);
+          syncRemotoTimer = null;
+        }
+        await forzarSyncPedidosAhora();
       }
-      marcarPedidosSyncPendiente(true);
-      await forzarSyncPedidosAhora();
-    }
   } catch (e) {
     console.error(e);
   }

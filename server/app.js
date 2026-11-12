@@ -1445,9 +1445,14 @@ app.delete(
 
 // --- Orders ---
 
+async function marcarCatalogoPedidosActualizado() {
+  await setMeta('orders_updated_ms', String(Date.now()));
+}
+
 app.get('/api/orders', asyncHandler(authMiddleware), asyncHandler(async (req, res) => {
   const lastRev = Number((await getMeta('orders_client_rev_v1')) || '0') || 0;
-  res.json(await buildOrdersResponseForUser(req.user, { clientRevision: lastRev }));
+  const updatedAt = Number((await getMeta('orders_updated_ms')) || '0') || 0;
+  res.json(await buildOrdersResponseForUser(req.user, { clientRevision: lastRev, updatedAt }));
 }));
 
 app.delete(
@@ -1485,6 +1490,7 @@ app.delete(
     if (pedido.assignedTo) await quitarIdDeRutaMensajero(pedido.assignedTo, id);
     const lastRev = Number((await getMeta('orders_client_rev_v1')) || '0') || 0;
     await setMeta('orders_client_rev_v1', String(lastRev + 1));
+    await marcarCatalogoPedidosActualizado();
     res.json({ ok: true });
   })
 );
@@ -1506,11 +1512,17 @@ app.put(
     await withOrdersWriteLock(async () => {
       const clientRev = Number(req.body?.clientRevision);
       const lastRev = Number((await getMeta('orders_client_rev_v1')) || '0') || 0;
-      if (Number.isFinite(clientRev) && clientRev > 0 && clientRev < lastRev) {
+      const clientUpdatedAt = Number(req.body?.clientUpdatedAt) || 0;
+      const serverUpdatedAt = Number((await getMeta('orders_updated_ms')) || '0') || 0;
+      if (
+        (Number.isFinite(clientRev) && clientRev > 0 && clientRev < lastRev) ||
+        (serverUpdatedAt && clientUpdatedAt && clientUpdatedAt + 1500 < serverUpdatedAt)
+      ) {
         res.status(409).json({
           error: 'Hay una versión más nueva de los pedidos en el servidor',
           code: 'STALE_ORDERS',
           lastRevision: lastRev,
+          updatedAt: serverUpdatedAt,
         });
         return;
       }
@@ -1535,6 +1547,7 @@ app.put(
         lastRev + 1
       );
       await setMeta('orders_client_rev_v1', String(nextRev));
+      await marcarCatalogoPedidosActualizado();
       res.json(
         await buildOrdersResponseForUser(req.user, {
           clientRevision: nextRev,
@@ -1653,6 +1666,7 @@ app.patch(
     if (p.assignedTo) {
       await sincronizarRutaMensajeroConservandoOrden(p.assignedTo);
     }
+    await marcarCatalogoPedidosActualizado();
     res.json({ order: p });
   })
 );
@@ -1706,6 +1720,7 @@ app.post(
       await sincronizarRutaMensajeroConservandoOrden(otroUid);
     }
     await sincronizarRutaMensajeroConservandoOrden(uid);
+    await marcarCatalogoPedidosActualizado();
 
     res.json({ ok: true, assignedTo: String(uid), count: orderIds.length });
   })
