@@ -2430,25 +2430,14 @@ function construirMensajeNotificarVendedorTelefono(pedido) {
   const aviso = pedido?.avisoTelefono;
   if (!aviso) return '';
   const idPedido = pedido.id != null ? pedido.id : 'N/A';
-  const nombre = String(pedido.nombre || '').trim() || 'Sin nombre';
-  const productos = textoProductosEntregaParaSoporte(pedido);
   const detalle =
     aviso.tipo === 'sobran'
       ? `Sobran ${aviso.diferencia} número(s).`
-      : `Faltan ${aviso.diferencia} número(s).`;
-  const numeroTxt = aviso.digitos
-    ? `Número detectado: ${aviso.digitos} (${aviso.cantidad != null ? aviso.cantidad : aviso.digitos.length} dígitos).`
-    : 'No se detectó número de teléfono en el pedido.';
-  return `Pedido #${idPedido} — teléfono del cliente incorrecto
-
-Cliente: ${nombre}
-${numeroTxt}
-${detalle} Deben ser ${LONGITUD_TELEFONO_LOCAL} números.
-
-Producto(s):
-${productos}
-
-Por favor revisar y corregir el pedido.`;
+      : aviso.digitos
+        ? `Faltan ${aviso.diferencia} número(s).`
+        : 'Falta el número de teléfono.';
+  const numero = aviso.digitos ? `\nTeléfono: ${aviso.digitos}` : '';
+  return `Pedido #${idPedido}\n${detalle}${numero}`;
 }
 
 function actualizarBannerAvisosTelefono() {
