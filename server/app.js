@@ -1616,6 +1616,7 @@ app.put(
     } else {
       await sincronizarRutaMensajeroConservandoOrden(uid);
     }
+    await marcarCatalogoPedidosActualizado();
     res.json(await buildOrdersResponseForUser(req.user));
   })
 );

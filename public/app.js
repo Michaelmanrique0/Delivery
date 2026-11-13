@@ -878,40 +878,52 @@ function flushSyncPedidosAlSalir() {
     clearTimeout(syncRemotoTimer);
     syncRemotoTimer = null;
   }
-  if (!sesionUsuario || !appEstaOnline() || !hayPedidosSyncPendiente() || !edicionPedidosEnEstaSesion) return;
+  if (!sesionUsuario || !appEstaOnline() || !hayPedidosSyncPendiente()) return;
+  if (!edicionPedidosEnEstaSesion && !(leerEdicionLocalPedidos() > 0)) return;
   try {
     const token = getAuthToken();
-    if (!token || !esSesionAdmin()) {
-      void syncPedidosAlServidor().catch((e) => console.error(e));
+    if (!token) return;
+    const orders = JSON.parse(JSON.stringify(pedidos || []));
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+    if (esSesionAdmin()) {
+      const revEnviada = pedidosLocalRev || cargarPedidosLocalRev();
+      const body = JSON.stringify({
+        orders,
+        orderIndex: orders.map((p) => idAlmacenPedido(p)),
+        clientRevision: revEnviada,
+        clientUpdatedAt: leerEdicionLocalPedidos(),
+      });
+      void fetch('/api/orders', {
+        method: 'PUT',
+        headers,
+        body,
+        keepalive: true,
+        credentials: 'same-origin',
+      })
+        .then((r) => {
+          const revAhora = pedidosLocalRev || cargarPedidosLocalRev();
+          if (r && r.ok && revEnviada === revAhora) marcarPedidosSyncPendiente(false);
+        })
+        .catch((e) => console.error(e));
       return;
     }
-    const revEnviada = pedidosLocalRev || cargarPedidosLocalRev();
-    const orders = JSON.parse(JSON.stringify(pedidos || []));
     const body = JSON.stringify({
       orders,
       orderIndex: orders.map((p) => idAlmacenPedido(p)),
-      clientRevision: revEnviada,
-      clientUpdatedAt: leerEdicionLocalPedidos(),
+      routeRevision: rutaLocalRev || cargarRutaLocalRev(),
     });
-    void fetch('/api/orders', {
+    void fetch('/api/orders/messenger', {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      headers,
       body,
       keepalive: true,
       credentials: 'same-origin',
-    })
-      .then((r) => {
-        const revAhora = pedidosLocalRev || cargarPedidosLocalRev();
-        // Solo quitar pendiente si no hubo cambios más nuevos mientras el PUT viajaba.
-        if (r && r.ok && revEnviada === revAhora) marcarPedidosSyncPendiente(false);
-      })
-      .catch((e) => console.error(e));
+    }).catch((e) => console.error(e));
   } catch (e) {
     console.error(e);
-    void syncPedidosAlServidor().catch((err) => console.error(err));
   }
 }
 
@@ -1219,16 +1231,19 @@ async function refrescarPedidosDesdeApi() {
   const delServidor = deduplicarPedidosPorId(
     (Array.isArray(data.orders) ? data.orders : []).map(normalizarPedidoEnMemoria)
   );
+  const serverAt = Number(data.updatedAt) || 0;
+  const localAt = leerEdicionLocalPedidos();
   const serverRutaRev = Math.max(0, Math.floor(Number(data.routeRevision || 0) || 0));
   const localRutaRev = rutaLocalRev || cargarRutaLocalRev();
-  const conservarLocal = edicionPedidosEnEstaSesion && localRutaRev > serverRutaRev;
+  const localMasNuevo = serverAt > 0 && localAt > serverAt;
+  const conservarLocal = localMasNuevo || (edicionPedidosEnEstaSesion && localRutaRev > serverRutaRev);
   fijarPedidosEnMemoria(fusionarPedidosMensajeroConservandoOrden(delServidor, conservarLocal));
-  if (conservarLocal && hayPedidosSyncPendiente()) {
+  if (conservarLocal && (localMasNuevo || hayPedidosSyncPendiente())) {
     await syncPedidosAlServidor();
     return;
   }
   guardarRutaLocalRev(Math.max(localRutaRev, serverRutaRev));
-  marcarPedidosSyncPendiente(false);
+  if (!localMasNuevo) marcarPedidosSyncPendiente(false);
   avisarCambioOrdenSiHaceFalta(data);
 }
 
@@ -3772,7 +3787,7 @@ function renderPedidos() {
     if (idTiendaPedido(pedido) !== String(tiendaActivaId || TIENDA_DEFAULT_ID)) return;
     if (pedido.cancelado) cancelados.push({ pedido, index });
     else if (pedido.entregado) entregados.push({ pedido, index });
-    else if (pedido.enCurso && pedido.notificadoEnCamino) enCurso.push({ pedido, index });
+    else if (pedido.enCurso) enCurso.push({ pedido, index });
     else pendientes.push({ pedido, index });
   });
 
@@ -3906,9 +3921,9 @@ function cambiarVistaPedidos(vista) {
   const vistaPed = pedidosDeTiendaActiva();
   let n = 0;
   if (vista === 'pendientes') {
-    n = vistaPed.filter((p) => !p.cancelado && !p.entregado && !(p.enCurso && p.notificadoEnCamino)).length;
+    n = vistaPed.filter((p) => !p.cancelado && !p.entregado && !p.enCurso).length;
   } else if (vista === 'enCurso') {
-    n = vistaPed.filter((p) => !p.cancelado && !p.entregado && p.enCurso && p.notificadoEnCamino).length;
+    n = vistaPed.filter((p) => !p.cancelado && !p.entregado && p.enCurso).length;
   } else if (vista === 'entregados') {
     n = vistaPed.filter((p) => p.entregado).length;
   } else if (vista === 'cancelados') {
@@ -7050,7 +7065,7 @@ function pedidoEsperaEnrutarTrasNotificar(pedidoId, tiendaId) {
 
 function alinearNotificacionSiSiguePendiente(pedido) {
   if (!pedido || pedido.cancelado || pedido.entregado) return pedido;
-  if (pedido.enCurso) return pedido;
+  if (pedido.enCurso || pedido.notificadoEnCamino) return pedido;
   if (
     pedidoEsperaEnrutarTrasNotificar(pedido.id, idTiendaPedido(pedido)) ||
     pedidoEsperaSegundoTelTrasNotificar(pedido.id, idTiendaPedido(pedido))
@@ -7058,8 +7073,6 @@ function alinearNotificacionSiSiguePendiente(pedido) {
     pedido.notificadoEnCamino = true;
     return pedido;
   }
-  pedido.notificadoEnCamino = false;
-  pedido.telefonosNotificadosEnCamino = [];
   return pedido;
 }
 
