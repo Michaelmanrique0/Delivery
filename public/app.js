@@ -2280,6 +2280,19 @@ function unirDigitosTelefonoSeparados(texto) {
   return unido;
 }
 
+function digitosTelefonoEncontrados(raw) {
+  const s = unirDigitosTelefonoSeparados(String(raw || '').trim());
+  if (!s) return [];
+  const matches = s.match(/\d{7,}/g) || [];
+  const out = [];
+  for (const m of matches) {
+    let d = String(m || '').replace(/\D/g, '');
+    while (d.startsWith('57') && d.length > LONGITUD_TELEFONO_LOCAL) d = d.slice(2);
+    if (d.length >= 7 && d.length <= 15) out.push(d);
+  }
+  return out;
+}
+
 function normalizarTelefonosDesdeTexto(raw) {
   const s = unirDigitosTelefonoSeparados(String(raw || '').trim());
   if (!s) return [];
@@ -2521,9 +2534,9 @@ function textoTelefonosPedidoParaInput(pedido) {
 
 function htmlTelefonosPedidoParaTarjeta(pedido) {
   const tels = obtenerTelefonosPedido(pedido);
-  if (tels.length === 0) return '';
-  // En una sola línea, separados por guión.
-  return tels.join(' - ');
+  if (tels.length) return tels.join(' - ');
+  const raw = digitosTelefonoLocalCelular(pedido && pedido.telefono);
+  return raw || '';
 }
 
 function claveTelefonoNotificacion(tel) {
@@ -2958,9 +2971,10 @@ function extraerCamposPedido(bloque) {
   for (const re of telPatrones) {
     const m = b.match(re);
     if (m && m[1]) {
-      telefonos = normalizarTelefonosDesdeTexto(m[1]);
-      telefono = telefonos[0] || '';
-      if (telefonos.length >= 1 && telefono.length >= 7) break;
+      const crudos = digitosTelefonoEncontrados(m[1]);
+      telefonos = uniquificarTelefonosLista(crudos);
+      telefono = telefonos[0] || crudos[0] || '';
+      if (telefono) break;
       telefono = '';
       telefonos = [];
     }
