@@ -51,6 +51,7 @@ let syncRemotoTimer = null;
 /** Evita que un sync viejo pise cambios más recientes o que un refresh borre lo local. */
 let syncPedidosEnCurso = false;
 let syncPedidosRepetir = false;
+let reintentosStalePedidos = 0;
 const PEDIDOS_SYNC_PENDING_KEY = 'deliveryPedidosSyncPending_v1';
 const PEDIDOS_REV_KEY = 'deliveryPedidosRev_v1';
 const RUTA_REV_KEY = 'deliveryRutaRev_v1';
@@ -442,6 +443,7 @@ async function crearTiendaDesdeUI() {
     });
     catalogoTiendas = Array.isArray(data.tiendas) ? data.tiendas : catalogoTiendas;
     tiendaActivaId = String(data.tiendaActivaId || data.tienda?.id || tiendaActivaId);
+    guardarCatalogoTiendasLocal();
     actualizarTextoCabeceraUsuario();
     if (input) input.value = '';
     if (inputTel) inputTel.value = '';
@@ -471,6 +473,7 @@ async function confirmarCambioTienda() {
     });
     tiendaActivaId = String(data.tiendaActivaId || id);
     if (Array.isArray(data.tiendas) && data.tiendas.length) catalogoTiendas = data.tiendas;
+    guardarCatalogoTiendasLocal();
     actualizarTextoCabeceraUsuario();
     cerrarModalCambiarTienda();
     renderPedidos();
@@ -1054,9 +1057,22 @@ async function syncPedidosAlServidor() {
         }
       } catch (e) {
         if (e && e.code === 'STALE_ORDERS') {
-          // Otra sesión ya guardó el catálogo (p. ej. borró pedidos). No reenviar esta lista vieja.
           try {
-  const data = await apiJson('/api/orders', { method: 'GET' });
+            const data = await apiJson('/api/orders', { method: 'GET' });
+            const serverAt = Number(data.updatedAt) || Number(e.updatedAt) || 0;
+            const localAt = leerEdicionLocalPedidos();
+            if (edicionPedidosEnEstaSesion && localAt > serverAt && reintentosStalePedidos < 1) {
+              reintentosStalePedidos += 1;
+              const srvRev = Number(e.lastRevision || data.clientRevision || 0) || 0;
+              if (srvRev > 0) {
+                pedidosLocalRev = srvRev;
+                try {
+                  localStorage.setItem(getPedidosRevKey(), String(srvRev));
+                } catch (_e) {}
+              }
+              syncPedidosRepetir = true;
+              return;
+            }
             aplicarPedidosDesdeServidor(data.orders);
             const srvRev = Number(e.lastRevision || data.clientRevision || 0) || 0;
             if (srvRev > 0) {
@@ -1077,6 +1093,8 @@ async function syncPedidosAlServidor() {
       }
       if (revAlEnviar !== (pedidosLocalRev || cargarPedidosLocalRev())) {
         syncPedidosRepetir = true;
+      } else {
+        reintentosStalePedidos = 0;
       }
     } while (syncPedidosRepetir);
     if (!syncPedidosRepetir) marcarPedidosSyncPendiente(false);
@@ -1121,7 +1139,7 @@ function aplicarPedidosDesdeServidor(raw) {
   const normalizados = deduplicarPedidosPorId(
     (Array.isArray(raw) ? raw : []).map(normalizarPedidoEnMemoria)
   );
-  pedidos = preservarNotificacionEnCaminoLocal(normalizados);
+  pedidos = preservarNotificacionEnCaminoLocal(mezclarPedidosCreadosEnSesion(normalizados));
   if (pedidos.length > 0) {
     nextPedidoId = Math.max(...pedidos.map((p) => p.id), 0) + 1;
   } else {
@@ -1207,10 +1225,17 @@ async function refrescarPedidosDesdeApi() {
     const data = await apiJson('/api/orders', { method: 'GET' });
     const serverAt = Number(data.updatedAt) || 0;
     const localAt = leerEdicionLocalPedidos();
-    if (edicionPedidosEnEstaSesion && hayPedidosSyncPendiente() && localAt > serverAt) {
-      await syncPedidosAlServidor();
-      if (hayPedidosSyncPendiente()) return;
+    if (edicionPedidosEnEstaSesion && localAt > serverAt) {
+      if (hayPedidosSyncPendiente() && !syncPedidosEnCurso) {
+        try {
+          await syncPedidosAlServidor();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      return;
     }
+    if (syncPedidosEnCurso) return;
     aplicarPedidosDesdeServidor(data.orders);
     const serverRev = Number(data.clientRevision || 0) || 0;
     if (serverRev > 0) {
@@ -3202,6 +3227,7 @@ async function procesarPedido() {
     ...baseNuevo
     };
     sincronizarAvisoTelefonoPedido(nuevoPedido);
+    recordarPedidoCreadoEnSesion(nuevoPedido);
     pedidos.push(nuevoPedido);
     pedidoFinalId = nuevoPedido.id;
   }
@@ -3377,6 +3403,7 @@ async function procesarMultiplesPedidos(texto) {
       ...baseLote
     };
     sincronizarAvisoTelefonoPedido(nuevoPedido);
+    recordarPedidoCreadoEnSesion(nuevoPedido);
     pedidos.push(nuevoPedido);
 
     agregados++;
@@ -3404,6 +3431,25 @@ async function procesarMultiplesPedidos(texto) {
 }
 
 let edicionPedidosEnEstaSesion = false;
+const pedidosCreadosEnSesion = new Set();
+
+function recordarPedidoCreadoEnSesion(pedido) {
+  const k = clavePedido(pedido);
+  if (k) pedidosCreadosEnSesion.add(k);
+}
+
+function mezclarPedidosCreadosEnSesion(lista) {
+  const base = Array.isArray(lista) ? lista.slice() : [];
+  if (!pedidosCreadosEnSesion.size) return base;
+  const keys = new Set(base.map((p) => clavePedido(p)).filter(Boolean));
+  for (const p of pedidos) {
+    const k = clavePedido(p);
+    if (!k || !pedidosCreadosEnSesion.has(k) || keys.has(k)) continue;
+    base.push(p);
+    keys.add(k);
+  }
+  return base;
+}
 
 function claveEdicionLocalPedidos() {
   const uid = sesionUsuario?.id || getAuthActiveUserId() || '0';
@@ -9157,25 +9203,39 @@ function cargarPedidosDesdeLocalStorage() {
 
 let authHayUsuarios = false;
 
+let operacionInicialPintada = false;
+
+function pintarListasYMapa() {
+  renderPedidos();
+  if (!mapa) void initMap();
+  else actualizarMarcadores({ conservarVista: false });
+}
+
 function pintarOperacionDesdeLocal() {
   cargarCatalogoTiendasLocal();
   cargarPaymentConfigLocal();
   cargarPedidosDesdeLocalStorage();
   actualizarTextoCabeceraUsuario();
-  renderPedidos();
-  if (!mapa) void initMap();
-  else actualizarMarcadores({ conservarVista: true });
+  if (!appEstaOnline()) {
+    pintarListasYMapa();
+    operacionInicialPintada = true;
+  }
 }
 
 async function sincronizarOperacionEnSegundoPlano() {
   if (!sesionUsuario || !appEstaOnline()) return;
   const firma = firmaPedidosParaRefresco();
-  const tiendaAntes = String(tiendaActivaId || '');
   try {
     await cargarTiendasDesdeApi();
   } catch (e) {
     console.error(e);
   }
+  if (!operacionInicialPintada) {
+    pintarListasYMapa();
+    operacionInicialPintada = true;
+  }
+  const firmaTrasTienda = firmaPedidosParaRefresco();
+  const tiendaTrasCarga = String(tiendaActivaId || '');
   try {
     await refrescarPedidosDesdeApi();
   } catch (e) {
@@ -9201,7 +9261,9 @@ async function sincronizarOperacionEnSegundoPlano() {
     console.error(e);
   }
   const cambioDatos =
-    firma !== firmaPedidosParaRefresco() || tiendaAntes !== String(tiendaActivaId || '');
+    firma !== firmaPedidosParaRefresco() ||
+    firmaTrasTienda !== firmaPedidosParaRefresco() ||
+    tiendaTrasCarga !== String(tiendaActivaId || '');
   if (cambioDatos || esSesionAdmin()) {
     renderPedidos();
     actualizarMarcadores({ conservarVista: true });
