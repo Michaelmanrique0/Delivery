@@ -3206,15 +3206,6 @@ async function procesarPedido() {
     ? elegirUrlMapsParaBloque(textoLimpio, textoLimpio, 0, urlsEnPegado)
     : '';
 
-  if (!mapUrl) {
-    mostrarToast(
-      'No se encontró URL de Google Maps en el texto pegado.\n\nAsegúrate de incluir el enlace de Maps junto con el formato del pedido.',
-      'error',
-      8000
-    );
-    return;
-  }
-
   const tidActiva = String(tiendaActivaId || TIENDA_DEFAULT_ID);
   const idxExistente =
     numeroPedido != null
@@ -3240,7 +3231,10 @@ async function procesarPedido() {
     prev.valorOriginal = null;
     prev.valorModificado = false;
     prev.textoOriginal = texto;
-    prev.mapUrl = mapUrlFinal;
+    if (mapUrlFinal) {
+      prev.mapUrl = mapUrlFinal;
+      prev.coords = null;
+    }
     sincronizarAvisoTelefonoPedido(prev);
     pedidoFinalId = prev.id;
   } else {
@@ -3275,7 +3269,7 @@ async function procesarPedido() {
   else actualizarMarcadores({ conservarVista: false });
   void forzarSyncPedidosAhora().catch((e) => console.error(e));
   const pedidoParaCoords = pedidos[indicePedidoEnTienda(pedidoFinalId, tidActiva)];
-  void completarCoordenadasPedido(pedidoParaCoords, mapUrl, campos.direccion);
+  if (mapUrl) void completarCoordenadasPedido(pedidoParaCoords, mapUrl, campos.direccion);
   const pedidoAviso = pedidoVistaPorId(pedidoFinalId);
   if (pedidoAviso && pedidoAviso.avisoTelefono) scrollToTopApp();
 
@@ -3288,10 +3282,13 @@ async function procesarPedido() {
     idxExistente < 0 && numeroPedido != null && Number(pedidoFinalId) !== Number(numeroPedido)
       ? ` El #${numeroPedido} ya existía en otra tienda; se guardó como #${pedidoFinalId}.`
       : '';
+  const avisoSinMapa = mapUrl
+    ? ''
+    : ' No se mostrará en el mapa porque no tiene el enlace para ubicarlo.';
   mostrarToast(
-    `Pedido #${pedidoFinalId} ${idxExistente >= 0 ? 'actualizado' : 'agregado'}. Productos: ${prodTxt}. Valor: $${valorTxt}.${extraNumero}`,
-    'success',
-    extraNumero ? 12000 : 9000
+    `Pedido #${pedidoFinalId} ${idxExistente >= 0 ? 'actualizado' : 'agregado'}. Productos: ${prodTxt}. Valor: $${valorTxt}.${extraNumero}${avisoSinMapa}`,
+    mapUrl ? 'success' : 'warning',
+    mapUrl ? (extraNumero ? 12000 : 9000) : 12000
   );
   } finally {
     setAppLoadingVisible(false);
@@ -3385,6 +3382,7 @@ async function procesarMultiplesPedidos(texto) {
   let agregados = 0;
   let errores = [];
   const pendientesCoords = [];
+  const sinEnlaceMapa = [];
 
   const btnProcesar = document.querySelector('.btn-primary');
   const textoOriginalBtn = btnProcesar ? btnProcesar.textContent : '';
@@ -3406,11 +3404,6 @@ async function procesarMultiplesPedidos(texto) {
     // 2) Si no hay, intenta heurística por bloque / índice.
     if (!mapUrl) mapUrl = elegirUrlMapsParaBloque(textoLimpio, bloque, indicePedidoEnLote, urlsGlobal);
     indicePedidoEnLote += 1;
-
-    if (!mapUrl) {
-      errores.push(`Pedido ${numLabel}: No se encontró URL de Maps`);
-      continue;
-    }
 
     const campos = extraerCamposPedido(bloque);
 
@@ -3437,7 +3430,8 @@ async function procesarMultiplesPedidos(texto) {
     sincronizarAvisoTelefonoPedido(nuevoPedido);
     recordarPedidoCreadoEnSesion(nuevoPedido);
     pedidos.push(nuevoPedido);
-    pendientesCoords.push({ pedido: nuevoPedido, mapUrl, direccion: campos.direccion });
+    if (mapUrl) pendientesCoords.push({ pedido: nuevoPedido, mapUrl, direccion: campos.direccion });
+    else sinEnlaceMapa.push(nuevoPedido.id);
 
     agregados++;
   }
@@ -3461,10 +3455,13 @@ async function procesarMultiplesPedidos(texto) {
   }
 
   let msg = `Se agregaron ${agregados} pedido(s)`;
-  if (errores.length > 0) {
-    msg += `\n\n⚠️ ${errores.length} pedido(s) no agregado(s):\n${errores.join('\n')}`;
+  if (sinEnlaceMapa.length > 0) {
+    msg += `\n\nPedido${sinEnlaceMapa.length > 1 ? 's' : ''} #${sinEnlaceMapa.join(', #')}: no se mostrar${sinEnlaceMapa.length > 1 ? 'án' : 'á'} en el mapa porque no tiene${sinEnlaceMapa.length > 1 ? 'n' : ''} el enlace para ubicarlo${sinEnlaceMapa.length > 1 ? 's' : ''}.`;
   }
-  mostrarToast(msg, errores.length > 0 ? 'warning' : 'success', errores.length > 0 ? 12000 : 6000);
+  if (errores.length > 0) {
+    msg += `\n\n${errores.length} pedido(s) no agregado(s):\n${errores.join('\n')}`;
+  }
+  mostrarToast(msg, errores.length > 0 || sinEnlaceMapa.length > 0 ? 'warning' : 'success', errores.length > 0 || sinEnlaceMapa.length > 0 ? 12000 : 6000);
   } finally {
     setAppLoadingVisible(false);
   }
@@ -8192,7 +8189,9 @@ function actualizarMarcadoresAhora(opciones) {
 
   let completados = 0;
   let huboSincCoordsDesdeUrl = false;
-  const conUbicacion = pedidosDeTiendaActiva().filter(p => !p.cancelado && (p.coords || p.mapUrl || p.direccion));
+  const conUbicacion = pedidosDeTiendaActiva().filter(
+    (p) => !p.cancelado && (String(p.mapUrl || '').trim() || (p.coords && p.coords.lat != null))
+  );
   const total = conUbicacion.length;
   if (total === 0) return;
 
