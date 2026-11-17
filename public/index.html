@@ -443,11 +443,11 @@
 
 <script src="ui/lucide.js?v=20261106bento"></script>
 <script src="ui/theme.js?v=20261106bento"></script>
-<script src="app.js?v=20261117tienda" defer></script>
+<script src="app.js?v=20261117carga" defer></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('./sw.js?v=20261108perf').catch(function (err) {
+    navigator.serviceWorker.register('./sw.js?v=20261117carga').catch(function (err) {
       console.warn('[sw] No se pudo registrar:', err);
     });
   });

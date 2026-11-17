@@ -1,5 +1,5 @@
 /* Red primero; si no hay internet, la última copia guardada de la app. */
-const CACHE_NAME = 'delivery-shell-v6';
+const CACHE_NAME = 'delivery-shell-v7';
 
 function respuestaCacheable(res) {
   if (!res) return false;

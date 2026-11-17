@@ -63,6 +63,10 @@ let listaMensajerosCache = [];
 const TIENDA_DEFAULT_ID = 'tienda-principal';
 let catalogoTiendas = [{ id: TIENDA_DEFAULT_ID, nombre: 'Tienda principal' }];
 let tiendaActivaId = TIENDA_DEFAULT_ID;
+/** Sube cuando el usuario elige tienda. Una respuesta vieja de /api/tiendas no puede revertirla. */
+let generacionTiendaActiva = 0;
+/** Sube al guardar pedidos. Un GET iniciado antes no puede borrar lo recién cargado. */
+let pedidosGeneracion = 0;
 
 function esSesionAdmin() {
   return !!sesionUsuario && sesionUsuario.role === 'admin';
@@ -278,11 +282,26 @@ function actualizarTextoCabeceraUsuario() {
   el.textContent = `${sesionUsuario.username} · ${rol} · ${nombreTiendaActiva()}`;
 }
 
+function fijarTiendaActivaLocal(id, tiendas) {
+  generacionTiendaActiva += 1;
+  if (Array.isArray(tiendas) && tiendas.length) catalogoTiendas = tiendas;
+  tiendaActivaId = String(id || TIENDA_DEFAULT_ID);
+  guardarCatalogoTiendasLocal();
+  actualizarTextoCabeceraUsuario();
+}
+
 async function cargarTiendasDesdeApi() {
+  const genAlIniciar = generacionTiendaActiva;
   const data = await apiJson('/api/tiendas', { method: 'GET' });
-  catalogoTiendas = Array.isArray(data.tiendas) && data.tiendas.length
+  const tiendas = Array.isArray(data.tiendas) && data.tiendas.length
     ? data.tiendas
     : [{ id: TIENDA_DEFAULT_ID, nombre: 'Tienda principal' }];
+  if (genAlIniciar !== generacionTiendaActiva) {
+    catalogoTiendas = tiendas;
+    guardarCatalogoTiendasLocal();
+    return data;
+  }
+  catalogoTiendas = tiendas;
   tiendaActivaId = String(data.tiendaActivaId || catalogoTiendas[0].id);
   guardarCatalogoTiendasLocal();
   actualizarTextoCabeceraUsuario();
@@ -441,10 +460,10 @@ async function crearTiendaDesdeUI() {
       method: 'POST',
       body: JSON.stringify({ nombre, telefonoConfirmacion }),
     });
-    catalogoTiendas = Array.isArray(data.tiendas) ? data.tiendas : catalogoTiendas;
-    tiendaActivaId = String(data.tiendaActivaId || data.tienda?.id || tiendaActivaId);
-    guardarCatalogoTiendasLocal();
-    actualizarTextoCabeceraUsuario();
+    fijarTiendaActivaLocal(
+      data.tiendaActivaId || data.tienda?.id || tiendaActivaId,
+      Array.isArray(data.tiendas) ? data.tiendas : catalogoTiendas
+    );
     if (input) input.value = '';
     if (inputTel) inputTel.value = '';
     pintarListaTiendasCambio();
@@ -471,10 +490,10 @@ async function confirmarCambioTienda() {
       method: 'PUT',
       body: JSON.stringify({ id }),
     });
-    tiendaActivaId = String(data.tiendaActivaId || id);
-    if (Array.isArray(data.tiendas) && data.tiendas.length) catalogoTiendas = data.tiendas;
-    guardarCatalogoTiendasLocal();
-    actualizarTextoCabeceraUsuario();
+    fijarTiendaActivaLocal(
+      data.tiendaActivaId || id,
+      Array.isArray(data.tiendas) && data.tiendas.length ? data.tiendas : catalogoTiendas
+    );
     cerrarModalCambiarTienda();
     renderPedidos();
     actualizarMarcadores();
@@ -1058,7 +1077,9 @@ async function syncPedidosAlServidor() {
       } catch (e) {
         if (e && e.code === 'STALE_ORDERS') {
           try {
+            const genAlLeer = pedidosGeneracion;
             const data = await apiJson('/api/orders', { method: 'GET' });
+            if (genAlLeer !== pedidosGeneracion) return;
             const serverAt = Number(data.updatedAt) || Number(e.updatedAt) || 0;
             const localAt = leerEdicionLocalPedidos();
             if (edicionPedidosEnEstaSesion && localAt > serverAt && reintentosStalePedidos < 1) {
@@ -1221,8 +1242,10 @@ function avisarCambioOrdenSiHaceFalta(data) {
   }
 
 async function refrescarPedidosDesdeApi() {
+  const genAlIniciar = pedidosGeneracion;
   if (esSesionAdmin()) {
     const data = await apiJson('/api/orders', { method: 'GET' });
+    if (genAlIniciar !== pedidosGeneracion) return;
     const serverAt = Number(data.updatedAt) || 0;
     const localAt = leerEdicionLocalPedidos();
     if (edicionPedidosEnEstaSesion && localAt > serverAt) {
@@ -1253,6 +1276,7 @@ async function refrescarPedidosDesdeApi() {
   }
 
   const data = await apiJson('/api/orders', { method: 'GET' });
+  if (genAlIniciar !== pedidosGeneracion) return;
   const delServidor = deduplicarPedidosPorId(
     (Array.isArray(data.orders) ? data.orders : []).map(normalizarPedidoEnMemoria)
   );
@@ -3233,7 +3257,11 @@ async function procesarPedido() {
   }
 
   guardarPedidos();
+  vistaPedidosSeleccionadaManual = true;
+  vistaPedidosActual = 'pendientes';
   renderPedidos();
+  if (!mapa) void initMap();
+  else actualizarMarcadores({ conservarVista: false });
   void forzarSyncPedidosAhora().catch((e) => console.error(e));
   const pedidoAviso = pedidoVistaPorId(pedidoFinalId);
   if (pedidoAviso && pedidoAviso.avisoTelefono) scrollToTopApp();
@@ -3413,7 +3441,11 @@ async function procesarMultiplesPedidos(texto) {
 
   if (agregados > 0) {
     guardarPedidos();
+    vistaPedidosSeleccionadaManual = true;
+    vistaPedidosActual = 'pendientes';
     renderPedidos();
+    if (!mapa) void initMap();
+    else actualizarMarcadores({ conservarVista: false });
     void forzarSyncPedidosAhora().catch((e) => console.error(e));
     if (pedidos.some((p) => p && p.avisoTelefono)) scrollToTopApp();
     setTimeout(() => actualizarMarcadores(), 500);
@@ -3474,6 +3506,7 @@ function leerEdicionLocalPedidos() {
 }
 
 function guardarPedidos() {
+  pedidosGeneracion += 1;
   pedidos = deduplicarPedidosPorId(pedidos);
   guardarCachePedidos();
   if (!sesionUsuario) return;
