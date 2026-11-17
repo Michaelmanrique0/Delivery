@@ -485,6 +485,16 @@ async function confirmarCambioTienda() {
     if (err) err.textContent = 'Elige una tienda.';
     return;
   }
+  if (id === String(tiendaActivaId || '')) {
+    cerrarModalCambiarTienda();
+    return;
+  }
+  cerrarModalCambiarTienda();
+  let avisoVisible = false;
+  const avisoTimer = window.setTimeout(() => {
+    avisoVisible = true;
+    setAppLoadingVisible(true, 'Cambiando de tienda');
+  }, 280);
   try {
     const data = await apiJson('/api/tiendas/activa', {
       method: 'PUT',
@@ -494,7 +504,6 @@ async function confirmarCambioTienda() {
       data.tiendaActivaId || id,
       Array.isArray(data.tiendas) && data.tiendas.length ? data.tiendas : catalogoTiendas
     );
-    cerrarModalCambiarTienda();
     renderPedidos();
     actualizarMarcadores();
     const pageHist = document.getElementById('pageHistorialEntregas');
@@ -505,7 +514,12 @@ async function confirmarCambioTienda() {
     cargarMediosPagoTiendaEnUI();
     mostrarToast(`Ahora trabajas en ${nombreTiendaActiva()}.`, 'success');
   } catch (e) {
-    if (err) err.textContent = String(e.message || e);
+    abrirModalCambiarTienda();
+    const errOtraVez = document.getElementById('cambiarTiendaError');
+    if (errOtraVez) errOtraVez.textContent = String(e.message || e);
+  } finally {
+    window.clearTimeout(avisoTimer);
+    if (avisoVisible) setAppLoadingVisible(false);
   }
 }
 
