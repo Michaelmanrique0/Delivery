@@ -1196,7 +1196,10 @@ function fusionarPedidosMensajeroConservandoOrden(delServidor, conservarObjetosL
     if (!k || vistos.has(k) || !porServidor.has(k)) continue;
     vistos.add(k);
     if (conservarObjetosLocales) {
-      out.push(normalizarPedidoEnMemoria(p));
+      const remoto = porServidor.get(k);
+      const local = normalizarPedidoEnMemoria({ ...p });
+      if (remoto && remoto.storageId) local.storageId = remoto.storageId;
+      out.push(local);
     } else {
       const remoto = porServidor.get(k);
       out.push(
@@ -3125,6 +3128,40 @@ function estaEnZonaOperacion(coords) {
   return coords.lat >= 4.1 && coords.lat <= 5.2 && coords.lng >= -74.7 && coords.lng <= -73.5;
 }
 
+async function completarCoordenadasPedido(pedido, mapUrl, direccion) {
+  if (!pedido || !mapUrl) return;
+  const clave = clavePedido(pedido);
+  let coords = null;
+  try {
+    coords = await obtenerCoordenadas(mapUrl, direccion);
+  } catch (e) {
+    console.error(e);
+  }
+  const actual = pedidos.find((p) => clavePedido(p) === clave) || pedido;
+  if (!actual) return;
+  if (!coords) {
+    const raw = extraerCoordenadas(mapUrl);
+    const msgFueraZona =
+      raw && !estaEnZonaOperacion(raw)
+        ? 'El enlace tiene coordenadas fuera de Bogotá y alrededores. Si el pedido es en zona, pega un enlace completo desde Maps o corrige la dirección para geocodificar.'
+        : '';
+    mostrarToast(
+      (msgFueraZona ||
+        `Pedido #${actual.id} quedó en la lista sin coordenadas. Abre el enlace, copia el enlace completo y pégalo abajo para aplicar.`) ,
+      'warning',
+      12000
+    );
+    return;
+  }
+  actual.coords = { lat: coords.lat, lng: coords.lng };
+  actual.mapUrl = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
+  guardarPedidos();
+  if (idTiendaPedido(actual) === String(tiendaActivaId || TIENDA_DEFAULT_ID)) {
+    renderPedidos();
+    actualizarMarcadores({ conservarVista: false });
+  }
+}
+
 async function obtenerCoordenadas(url, direccion) {
   const coords = extraerCoordenadas(url);
   if (coords && estaEnZonaOperacion(coords)) return coords;
@@ -3178,29 +3215,6 @@ async function procesarPedido() {
     return;
   }
 
-  const btnProcesar = document.querySelector('.btn-primary');
-  const textoOriginalBtn = btnProcesar ? btnProcesar.textContent : '';
-  if (btnProcesar) { btnProcesar.textContent = 'Procesando...'; btnProcesar.disabled = true; }
-
-  const coords = await obtenerCoordenadas(mapUrl, campos.direccion);
-
-  if (btnProcesar) { btnProcesar.textContent = textoOriginalBtn; btnProcesar.disabled = false; }
-
-  if (!coords) {
-    const raw = extraerCoordenadas(mapUrl);
-    const msgFueraZona =
-      raw && !estaEnZonaOperacion(raw)
-        ? 'El enlace tiene coordenadas fuera de Bogotá y alrededores. Si el pedido es en zona, pega un enlace completo desde Maps o corrige la dirección para geocodificar.'
-        : '';
-    mostrarToast(
-      (msgFueraZona ||
-        'No se pudieron obtener coordenadas en zona desde la URL ni desde la dirección (enlace solo con nombre de lugar, enlace corto fallido, etc.).') +
-        '\n\nSe guardará el pedido sin coordenadas. Abre el enlace, copia el enlace completo y pégalo en el apartado de abajo para aplicar.',
-      'warning',
-      12000
-    );
-  }
-
   const tidActiva = String(tiendaActivaId || TIENDA_DEFAULT_ID);
   const idxExistente =
     numeroPedido != null
@@ -3209,9 +3223,7 @@ async function procesarPedido() {
         )
       : -1;
   const pedidoId = idxExistente >= 0 ? Number(numeroPedido) : generarPedidoId(numeroPedido);
-  const mapUrlFinal = coords && coords.lat && coords.lng
-    ? `https://www.google.com/maps?q=${coords.lat},${coords.lng}`
-    : mapUrl;
+  const mapUrlFinal = mapUrl;
 
   const productosLimpios = Array.isArray(campos.productos) ? campos.productos : [];
   const valorLimpio = String(campos.valor || '0').replace(/[^\d]/g, '') || '0';
@@ -3229,7 +3241,6 @@ async function procesarPedido() {
     prev.valorModificado = false;
     prev.textoOriginal = texto;
     prev.mapUrl = mapUrlFinal;
-    prev.coords = coords && coords.lat && coords.lng ? { lat: coords.lat, lng: coords.lng } : null;
     sincronizarAvisoTelefonoPedido(prev);
     pedidoFinalId = prev.id;
   } else {
@@ -3247,7 +3258,7 @@ async function procesarPedido() {
       valorModificado: false,
     textoOriginal: texto,
     mapUrl: mapUrlFinal,
-    coords: coords && coords.lat && coords.lng ? { lat: coords.lat, lng: coords.lng } : null,
+    coords: null,
     ...baseNuevo
     };
     sincronizarAvisoTelefonoPedido(nuevoPedido);
@@ -3263,6 +3274,8 @@ async function procesarPedido() {
   if (!mapa) void initMap();
   else actualizarMarcadores({ conservarVista: false });
   void forzarSyncPedidosAhora().catch((e) => console.error(e));
+  const pedidoParaCoords = pedidos[indicePedidoEnTienda(pedidoFinalId, tidActiva)];
+  void completarCoordenadasPedido(pedidoParaCoords, mapUrl, campos.direccion);
   const pedidoAviso = pedidoVistaPorId(pedidoFinalId);
   if (pedidoAviso && pedidoAviso.avisoTelefono) scrollToTopApp();
 
@@ -3371,6 +3384,7 @@ async function procesarMultiplesPedidos(texto) {
 
   let agregados = 0;
   let errores = [];
+  const pendientesCoords = [];
 
   const btnProcesar = document.querySelector('.btn-primary');
   const textoOriginalBtn = btnProcesar ? btnProcesar.textContent : '';
@@ -3400,18 +3414,8 @@ async function procesarMultiplesPedidos(texto) {
 
     const campos = extraerCamposPedido(bloque);
 
-    if (btnProcesar) { btnProcesar.textContent = `Procesando pedido ${numLabel}...`; btnProcesar.disabled = true; }
-
-    const coords = await obtenerCoordenadas(mapUrl, campos.direccion);
-    const sinCoords = !coords;
-    if (sinCoords) {
-      errores.push(`Pedido ${numLabel}: No se pudieron extraer coordenadas (se guardó sin coordenadas)`);
-    }
-
     const pedidoId = generarPedidoId(numeroPedido);
-    const mapUrlFinal = coords && coords.lat && coords.lng
-      ? `https://www.google.com/maps?q=${coords.lat},${coords.lng}`
-      : mapUrl;
+    const mapUrlFinal = mapUrl;
 
     const baseLote = pedidoNuevoBase();
     if (sesionUsuario) baseLote.createdBy = String(sesionUsuario.id);
@@ -3427,12 +3431,13 @@ async function procesarMultiplesPedidos(texto) {
       valorModificado: false,
       textoOriginal: bloque.trim(),
       mapUrl: mapUrlFinal,
-      coords: coords && coords.lat && coords.lng ? { lat: coords.lat, lng: coords.lng } : null,
+      coords: null,
       ...baseLote
     };
     sincronizarAvisoTelefonoPedido(nuevoPedido);
     recordarPedidoCreadoEnSesion(nuevoPedido);
     pedidos.push(nuevoPedido);
+    pendientesCoords.push({ pedido: nuevoPedido, mapUrl, direccion: campos.direccion });
 
     agregados++;
   }
@@ -3447,6 +3452,9 @@ async function procesarMultiplesPedidos(texto) {
     if (!mapa) void initMap();
     else actualizarMarcadores({ conservarVista: false });
     void forzarSyncPedidosAhora().catch((e) => console.error(e));
+    for (const item of pendientesCoords) {
+      void completarCoordenadasPedido(item.pedido, item.mapUrl, item.direccion);
+    }
     if (pedidos.some((p) => p && p.avisoTelefono)) scrollToTopApp();
     setTimeout(() => actualizarMarcadores(), 500);
     document.getElementById("textoPedido").value = "";
@@ -3505,7 +3513,34 @@ function leerEdicionLocalPedidos() {
   }
 }
 
+function firmaEstadoPedido(pedido) {
+  if (!pedido) return '';
+  return [
+    pedido.entregado ? 1 : 0,
+    pedido.enCurso ? 1 : 0,
+    pedido.cancelado ? 1 : 0,
+    pedido.llegoDestino ? 1 : 0,
+    pedido.notificadoEnCamino ? 1 : 0,
+  ].join('');
+}
+
+let firmaEstadoPedidosPrevia = new Map();
+
+function sellarEstadoSiCambio() {
+  const siguiente = new Map();
+  for (const pedido of pedidos) {
+    const clave = clavePedido(pedido);
+    if (!clave) continue;
+    const firma = firmaEstadoPedido(pedido);
+    const previa = firmaEstadoPedidosPrevia.get(clave);
+    if (previa !== undefined && previa !== firma) pedido.estadoMs = Date.now();
+    siguiente.set(clave, firma);
+  }
+  firmaEstadoPedidosPrevia = siguiente;
+}
+
 function guardarPedidos() {
+  sellarEstadoSiCambio();
   pedidosGeneracion += 1;
   pedidos = deduplicarPedidosPorId(pedidos);
   guardarCachePedidos();

@@ -275,6 +275,81 @@ function clavePedidoServidor(p) {
   return `${tid}::${id}`;
 }
 
+function rangoEstadoPedido(p) {
+  if (!p) return 0;
+  if (p.cancelado || p.entregado) return 3;
+  if (p.llegoDestino || p.enCurso) return 2;
+  if (p.notificadoEnCamino) return 1;
+  return 0;
+}
+
+const CAMPOS_ESTADO_PEDIDO = [
+  'entregado',
+  'enCurso',
+  'cancelado',
+  'llegoDestino',
+  'notificadoEnCamino',
+  'haSidoEnrutado',
+  'noEntregado',
+  'envioRecogido',
+  'fechaOperacion',
+  'metodoPagoEntrega',
+  'montoNequi',
+  'montoDaviplata',
+  'montoEfectivo',
+  'dioCambio',
+  'cambioMetodo',
+  'montoCambio',
+  'esDevolucionCliente',
+  'montoDevolucion',
+  'metodoDevolucion',
+  'lugarEntregaFinal',
+  'porteriaRecibidoPor',
+  'telefonosNotificadosEnCamino',
+  'estadoMs',
+];
+
+/** Si el celular ya marcó entregado y el PC manda la copia vieja en pendiente, se conserva el avance. */
+function fusionarPedidoConServidor(existente, entrante) {
+  if (!existente) return entrante;
+  const msE = Number(existente.estadoMs) || 0;
+  const msN = Number(entrante.estadoMs) || 0;
+  if (msN > msE) return entrante;
+  if (rangoEstadoPedido(existente) > rangoEstadoPedido(entrante)) {
+    const out = { ...entrante };
+    for (const k of CAMPOS_ESTADO_PEDIDO) {
+      if (existente[k] !== undefined) out[k] = existente[k];
+    }
+    out.storageId = Number(existente.storageId) || entrante.storageId;
+    return out;
+  }
+  return entrante;
+}
+
+function indiceFilasPedidos(rows) {
+  const porId = new Map();
+  const porClave = new Map();
+  for (const row of rows || []) {
+    const pedido = pedidoDesdeFila(row);
+    if (!pedido) continue;
+    const rowId = Number(row.id);
+    if (!Number.isFinite(rowId) || rowId <= 0) continue;
+    porId.set(rowId, { rowId, pedido });
+    const clave = clavePedidoServidor(pedido);
+    if (clave && !porClave.has(clave)) porClave.set(clave, { rowId, pedido });
+  }
+  return { porId, porClave };
+}
+
+function filaExistenteDePedido(p, indice) {
+  const clave = clavePedidoServidor(p);
+  const almacen = idAlmacenPedidoServidor(p);
+  let encontrado = indice.porId.get(almacen) || null;
+  if (encontrado && clave && clavePedidoServidor(encontrado.pedido) !== clave) encontrado = null;
+  if (!encontrado && clave) encontrado = indice.porClave.get(clave) || null;
+  return encontrado;
+}
+
 /**
  * Conserva el orden que ya tiene el mensajero.
  * Los pedidos recién asignados se agregan al final, sin repetir el mismo pedido.
@@ -1526,15 +1601,22 @@ app.put(
         });
         return;
       }
+      const indice = indiceFilasPedidos(await getAllOrdersRows());
       const rows = orders
         .filter((p) => p && p.id != null && Number.isFinite(Number(p.id)))
         .map((p) => {
           if (!String(p.tiendaId || '').trim()) p.tiendaId = TIENDA_ID_DEFAULT;
-          const almacen = idAlmacenPedidoServidor(p);
-          p.storageId = almacen;
+          const existente = filaExistenteDePedido(p, indice);
+          let payload = p;
+          let almacen = idAlmacenPedidoServidor(p);
+          if (existente) {
+            payload = fusionarPedidoConServidor(existente.pedido, p);
+            almacen = existente.rowId;
+          }
+          payload.storageId = almacen;
           return {
             id: almacen,
-            payload: JSON.stringify(p),
+            payload: JSON.stringify(payload),
           };
         })
         .filter((r) => Number.isFinite(r.id) && r.id > 0);
@@ -1576,15 +1658,17 @@ app.put(
     }
     const uid = String(req.user.id);
     const existingRows = await getAllOrdersRows();
-    const existingIds = new Set(existingRows.map((r) => Number(r.id)));
+    const indice = indiceFilasPedidos(existingRows);
     for (const p of orders) {
       if (!p || p.id == null) continue;
-      const id = idAlmacenPedidoServidor(p);
-      if (!existingIds.has(id)) continue;
-      if (String(p.assignedTo || '') !== uid) continue;
       if (!String(p.tiendaId || '').trim()) p.tiendaId = TIENDA_ID_DEFAULT;
-      p.storageId = id;
-      await upsertOrderRow(id, p);
+      const existente = filaExistenteDePedido(p, indice);
+      if (!existente) continue;
+      if (String(existente.pedido.assignedTo || '') !== uid && String(p.assignedTo || '') !== uid) continue;
+      const payload = fusionarPedidoConServidor(existente.pedido, p);
+      if (String(existente.pedido.assignedTo || '') === uid) payload.assignedTo = uid;
+      payload.storageId = existente.rowId;
+      await upsertOrderRow(existente.rowId, payload);
     }
     const mine = await idsAsignadosMensajero(uid);
     const clientRoute = orderIndex
