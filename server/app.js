@@ -1552,20 +1552,22 @@ app.delete(
       res.status(403).json({ error: 'No puedes eliminar este pedido' });
       return;
     }
-    await deleteOrderRow(id);
-    let orderIndex = [];
-    try {
-      orderIndex = JSON.parse((await getMeta('order_index')) || '[]');
-    } catch (_e) {
-      orderIndex = [];
-    }
-    if (!Array.isArray(orderIndex)) orderIndex = [];
-    orderIndex = orderIndex.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x !== id);
-    await setMeta('order_index', JSON.stringify(orderIndex));
-    if (pedido.assignedTo) await quitarIdDeRutaMensajero(pedido.assignedTo, id);
-    const lastRev = Number((await getMeta('orders_client_rev_v1')) || '0') || 0;
-    await setMeta('orders_client_rev_v1', String(lastRev + 1));
-    await marcarCatalogoPedidosActualizado();
+    await withOrdersWriteLock(async () => {
+      await deleteOrderRow(id);
+      let orderIndex = [];
+      try {
+        orderIndex = JSON.parse((await getMeta('order_index')) || '[]');
+      } catch (_e) {
+        orderIndex = [];
+      }
+      if (!Array.isArray(orderIndex)) orderIndex = [];
+      orderIndex = orderIndex.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x !== id);
+      await setMeta('order_index', JSON.stringify(orderIndex));
+      if (pedido.assignedTo) await quitarIdDeRutaMensajero(pedido.assignedTo, id);
+      const lastRev = Number((await getMeta('orders_client_rev_v1')) || '0') || 0;
+      await setMeta('orders_client_rev_v1', String(lastRev + 1));
+      await marcarCatalogoPedidosActualizado();
+    });
     res.json({ ok: true });
   })
 );
@@ -1620,8 +1622,15 @@ app.put(
           };
         })
         .filter((r) => Number.isFinite(r.id) && r.id > 0);
+      const idsEnviados = new Set(rows.map((r) => Number(r.id)));
+      for (const [rowId, info] of indice.porId) {
+        if (idsEnviados.has(rowId)) continue;
+        const payload = { ...info.pedido, storageId: rowId };
+        rows.push({ id: rowId, payload: JSON.stringify(payload) });
+        idsEnviados.add(rowId);
+      }
       await replaceAllOrders(rows);
-      const idsVigentes = orderIndex.map((oid) => Number(oid)).filter(Number.isFinite);
+      const idsVigentes = [...idsEnviados];
       await setMeta('order_index', JSON.stringify(idsVigentes));
       await podarRutasMensajeros(idsVigentes);
       const nextRev = Math.max(

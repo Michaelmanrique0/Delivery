@@ -915,7 +915,7 @@ function flushSyncPedidosAlSalir() {
     syncRemotoTimer = null;
   }
   if (!sesionUsuario || !appEstaOnline() || !hayPedidosSyncPendiente()) return;
-  if (!edicionPedidosEnEstaSesion && !(leerEdicionLocalPedidos() > 0)) return;
+  if (!edicionPedidosEnEstaSesion) return;
   try {
     const token = getAuthToken();
     if (!token) return;
@@ -1065,6 +1065,7 @@ async function syncPedidosAlServidor() {
       const orderIndex = orders.map((p) => idAlmacenPedido(p));
       try {
   if (esSesionAdmin()) {
+    if (!edicionPedidosEnEstaSesion) return;
     await apiJson('/api/orders', {
       method: 'PUT',
             body: JSON.stringify({
@@ -1094,20 +1095,6 @@ async function syncPedidosAlServidor() {
             const genAlLeer = pedidosGeneracion;
             const data = await apiJson('/api/orders', { method: 'GET' });
             if (genAlLeer !== pedidosGeneracion) return;
-            const serverAt = Number(data.updatedAt) || Number(e.updatedAt) || 0;
-            const localAt = leerEdicionLocalPedidos();
-            if (edicionPedidosEnEstaSesion && localAt > serverAt && reintentosStalePedidos < 1) {
-              reintentosStalePedidos += 1;
-              const srvRev = Number(e.lastRevision || data.clientRevision || 0) || 0;
-              if (srvRev > 0) {
-                pedidosLocalRev = srvRev;
-                try {
-                  localStorage.setItem(getPedidosRevKey(), String(srvRev));
-                } catch (_e) {}
-              }
-              syncPedidosRepetir = true;
-              return;
-            }
             aplicarPedidosDesdeServidor(data.orders);
             const srvRev = Number(e.lastRevision || data.clientRevision || 0) || 0;
             if (srvRev > 0) {
@@ -1263,31 +1250,41 @@ async function refrescarPedidosDesdeApi() {
   if (esSesionAdmin()) {
     const data = await apiJson('/api/orders', { method: 'GET' });
     if (genAlIniciar !== pedidosGeneracion) return;
-    const serverAt = Number(data.updatedAt) || 0;
-    const localAt = leerEdicionLocalPedidos();
-    if (edicionPedidosEnEstaSesion && localAt > serverAt) {
-      if (hayPedidosSyncPendiente() && !syncPedidosEnCurso) {
-        try {
-          await syncPedidosAlServidor();
-        } catch (e) {
-          console.error(e);
-        }
+    const delServidor = deduplicarPedidosPorId(
+      (Array.isArray(data.orders) ? data.orders : []).map(normalizarPedidoEnMemoria)
+    );
+    const clavesServidor = new Set(delServidor.map((p) => clavePedido(p)).filter(Boolean));
+    const soloLocal = (pedidos || []).filter((p) => {
+      const k = clavePedido(p);
+      return k && !clavesServidor.has(k);
+    });
+    if (soloLocal.length > 0 && !edicionPedidosEnEstaSesion) {
+      pedidos = deduplicarPedidosPorId(delServidor.concat(soloLocal));
+      guardarCachePedidos();
+      edicionPedidosEnEstaSesion = true;
+      marcarEdicionLocalPedidos();
+      marcarPedidosSyncPendiente(true);
+      try {
+        await syncPedidosAlServidor();
+      } catch (e) {
+        console.error(e);
       }
+      renderPedidos();
+      actualizarMarcadores({ conservarVista: true });
       return;
     }
-    if (syncPedidosEnCurso) return;
     aplicarPedidosDesdeServidor(data.orders);
     const serverRev = Number(data.clientRevision || 0) || 0;
     if (serverRev > 0) {
       const localRev = pedidosLocalRev || cargarPedidosLocalRev();
-      if (serverRev > localRev) {
-        pedidosLocalRev = serverRev;
-        try {
-          localStorage.setItem(getPedidosRevKey(), String(serverRev));
-        } catch (_e) {}
-      }
+    if (serverRev > localRev) {
+      pedidosLocalRev = serverRev;
+      try {
+        localStorage.setItem(getPedidosRevKey(), String(serverRev));
+      } catch (_e) {}
     }
-    if (!edicionPedidosEnEstaSesion || localAt <= serverAt) marcarPedidosSyncPendiente(false);
+    }
+    if (!edicionPedidosEnEstaSesion) marcarPedidosSyncPendiente(false);
     avisarCambioOrdenSiHaceFalta(data);
     return;
   }
