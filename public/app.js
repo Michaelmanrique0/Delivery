@@ -1066,7 +1066,7 @@ async function syncPedidosAlServidor() {
       try {
   if (esSesionAdmin()) {
     if (!edicionPedidosEnEstaSesion) return;
-    await apiJson('/api/orders', {
+    const resp = await apiJson('/api/orders', {
       method: 'PUT',
             body: JSON.stringify({
               orders,
@@ -1075,6 +1075,7 @@ async function syncPedidosAlServidor() {
               clientUpdatedAt: leerEdicionLocalPedidos(),
             }),
     });
+    if (resp && Array.isArray(resp.orders)) aplicarPedidosDesdeServidor(resp.orders);
   } else {
           const rutaResp = await apiJson('/api/orders/messenger', {
       method: 'PUT',
@@ -1188,12 +1189,17 @@ function fusionarPedidosMensajeroConservandoOrden(delServidor, conservarObjetosL
   const remotos = deduplicarPedidosPorId(
     (Array.isArray(delServidor) ? delServidor : []).map(normalizarPedidoEnMemoria)
   );
-  const porServidor = new Map(remotos.map((p) => [clavePedido(p), p]));
+  const claveFila = (p) => {
+    const sid = Number(p && p.storageId);
+    if (Number.isFinite(sid) && sid > 0) return `row:${sid}`;
+    return clavePedido(p);
+  };
+  const porServidor = new Map(remotos.map((p) => [claveFila(p), p]));
   const base = Array.isArray(pedidos) && pedidos.length > 0 ? pedidos : [];
   const vistos = new Set();
   const out = [];
   for (const p of base) {
-    const k = clavePedido(p);
+    const k = claveFila(p);
     if (!k || vistos.has(k) || !porServidor.has(k)) continue;
     vistos.add(k);
     if (conservarObjetosLocales) {
@@ -1215,7 +1221,7 @@ function fusionarPedidosMensajeroConservandoOrden(delServidor, conservarObjetosL
     }
   }
   for (const p of remotos) {
-    const k = clavePedido(p);
+    const k = claveFila(p);
     if (!k || vistos.has(k)) continue;
     vistos.add(k);
     out.push(p);
@@ -1906,19 +1912,24 @@ function guardarCachePedidos() {
   }
 }
 
-/** Quita duplicados por tienda + número, conservando el orden (gana la última aparición). */
+/** Quita copias del mismo registro. Dos pedidos con distinto id de almacén se conservan. */
 function deduplicarPedidosPorId(lista) {
   const arr = Array.isArray(lista) ? lista : [];
+  const claveUnica = (p) => {
+    const sid = Number(p && p.storageId);
+    if (Number.isFinite(sid) && sid > 0) return `row:${sid}`;
+    return clavePedido(p);
+  };
   const map = new Map();
   arr.forEach((p) => {
-    const k = clavePedido(p);
+    const k = claveUnica(p);
     if (!k) return;
     map.set(k, p);
   });
   const seen = new Set();
   const out = [];
   arr.forEach((p) => {
-    const k = clavePedido(p);
+    const k = claveUnica(p);
     if (!k || seen.has(k)) return;
     seen.add(k);
     const ultimo = map.get(k);
@@ -4153,23 +4164,22 @@ async function asignarActivosBulkDesdeBarra() {
     mostrarToast('Elige un mensajero en la lista.', 'warning');
     return;
   }
-  const orderIds = pedidosDeTiendaActiva()
-    .filter((p) => !p.entregado && !p.cancelado)
-    .map((p) => idAlmacenPedido(p));
-  if (orderIds.length === 0) {
-    mostrarToast('No hay pedidos activos para asignar.', 'info');
-    return;
-  }
   const nombreMensajero = nombreMensajeroPorId(uid);
   const mensajeCarga = nombreMensajero
-    ? `Asignando ${orderIds.length} pedido(s) al mensajero ${nombreMensajero}…`
-    : `Asignando ${orderIds.length} pedido(s) al mensajero…`;
+    ? `Asignando los pedidos al mensajero ${nombreMensajero}…`
+    : 'Asignando los pedidos al mensajero…';
   const bulkBtn = document.getElementById('bulkAssignBtn');
   sel.disabled = true;
   if (bulkBtn) bulkBtn.disabled = true;
   await mostrarLoadingYEsperarPintado(mensajeCarga);
   try {
     if (hayPedidosSyncPendiente()) await forzarSyncPedidosAhora();
+    const activos = pedidosDeTiendaActiva().filter((p) => !p.entregado && !p.cancelado);
+    const orderIds = activos.map((p) => idAlmacenPedido(p)).filter((id) => id > 0);
+    if (orderIds.length === 0) {
+      mostrarToast('No hay pedidos activos para asignar.', 'info');
+      return;
+    }
     const idsBulk = new Set(orderIds);
     for (const p of pedidos) {
       if (idsBulk.has(idAlmacenPedido(p))) p.assignedTo = String(uid);

@@ -437,15 +437,11 @@ async function buildOrdersResponseForUser(user, extra = {}) {
 
   const ordered = [];
   const seenRow = new Set();
-  const seenClave = new Set();
   const pushPedido = (rowId) => {
     if (rowId == null || seenRow.has(rowId)) return;
     const p = byRow.get(rowId);
     if (!p) return;
-    const clave = clavePedidoServidor(p);
-    if (!clave || seenClave.has(clave)) return;
     seenRow.add(rowId);
-    seenClave.add(clave);
     ordered.push(p);
   };
   for (const rawId of routeIds) pushPedido(resolverFilaAsignada(asignados, rawId));
@@ -1604,6 +1600,15 @@ app.put(
         return;
       }
       const indice = indiceFilasPedidos(await getAllOrdersRows());
+      const usados = new Set(indice.porId.keys());
+      let siguienteLibre = usados.size ? Math.max(...usados) + 1 : 1;
+      const reservarId = () => {
+        while (usados.has(siguienteLibre)) siguienteLibre += 1;
+        const id = siguienteLibre;
+        usados.add(id);
+        siguienteLibre += 1;
+        return id;
+      };
       const rows = orders
         .filter((p) => p && p.id != null && Number.isFinite(Number(p.id)))
         .map((p) => {
@@ -1614,6 +1619,10 @@ app.put(
           if (existente) {
             payload = fusionarPedidoConServidor(existente.pedido, p);
             almacen = existente.rowId;
+          } else if (!Number.isFinite(almacen) || almacen <= 0 || usados.has(almacen)) {
+            almacen = reservarId();
+          } else {
+            usados.add(almacen);
           }
           payload.storageId = almacen;
           return {
