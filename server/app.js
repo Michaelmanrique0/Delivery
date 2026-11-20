@@ -1613,12 +1613,15 @@ app.put(
         .filter((p) => p && p.id != null && Number.isFinite(Number(p.id)))
         .map((p) => {
           if (!String(p.tiendaId || '').trim()) p.tiendaId = TIENDA_ID_DEFAULT;
-          const existente = filaExistenteDePedido(p, indice);
-          let payload = p;
           let almacen = idAlmacenPedidoServidor(p);
-          if (existente) {
-            payload = fusionarPedidoConServidor(existente.pedido, p);
-            almacen = existente.rowId;
+          const porId = Number.isFinite(almacen) ? indice.porId.get(almacen) : null;
+          const mismaFila =
+            porId &&
+            (!clavePedidoServidor(p) || clavePedidoServidor(porId.pedido) === clavePedidoServidor(p));
+          let payload = p;
+          if (mismaFila) {
+            payload = fusionarPedidoConServidor(porId.pedido, p);
+            almacen = porId.rowId;
           } else if (!Number.isFinite(almacen) || almacen <= 0 || usados.has(almacen)) {
             almacen = reservarId();
           } else {
@@ -1632,12 +1635,6 @@ app.put(
         })
         .filter((r) => Number.isFinite(r.id) && r.id > 0);
       const idsEnviados = new Set(rows.map((r) => Number(r.id)));
-      for (const [rowId, info] of indice.porId) {
-        if (idsEnviados.has(rowId)) continue;
-        const payload = { ...info.pedido, storageId: rowId };
-        rows.push({ id: rowId, payload: JSON.stringify(payload) });
-        idsEnviados.add(rowId);
-      }
       await replaceAllOrders(rows);
       const idsVigentes = [...idsEnviados];
       await setMeta('order_index', JSON.stringify(idsVigentes));

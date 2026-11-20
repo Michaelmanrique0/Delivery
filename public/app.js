@@ -1061,7 +1061,8 @@ async function syncPedidosAlServidor() {
     do {
       syncPedidosRepetir = false;
       const revAlEnviar = pedidosLocalRev || cargarPedidosLocalRev();
-      const orders = JSON.parse(JSON.stringify(pedidos || []));
+      const genAlEnviar = pedidosGeneracion;
+      const orders = JSON.parse(JSON.stringify(filtrarPedidosEliminados(pedidos || [])));
       const orderIndex = orders.map((p) => idAlmacenPedido(p));
       try {
   if (esSesionAdmin()) {
@@ -1075,6 +1076,10 @@ async function syncPedidosAlServidor() {
               clientUpdatedAt: leerEdicionLocalPedidos(),
             }),
     });
+    if (genAlEnviar !== pedidosGeneracion) {
+      syncPedidosRepetir = true;
+      return;
+    }
     if (resp && Array.isArray(resp.orders)) aplicarPedidosDesdeServidor(resp.orders);
   } else {
           const rutaResp = await apiJson('/api/orders/messenger', {
@@ -1159,8 +1164,8 @@ function preservarNotificacionEnCaminoLocal(listaNueva) {
 }
 
 function aplicarPedidosDesdeServidor(raw) {
-  const normalizados = deduplicarPedidosPorId(
-    (Array.isArray(raw) ? raw : []).map(normalizarPedidoEnMemoria)
+  const normalizados = filtrarPedidosEliminados(
+    deduplicarPedidosPorId((Array.isArray(raw) ? raw : []).map(normalizarPedidoEnMemoria))
   );
   pedidos = preservarNotificacionEnCaminoLocal(mezclarPedidosCreadosEnSesion(normalizados));
   if (pedidos.length > 0) {
@@ -1256,29 +1261,7 @@ async function refrescarPedidosDesdeApi() {
   if (esSesionAdmin()) {
     const data = await apiJson('/api/orders', { method: 'GET' });
     if (genAlIniciar !== pedidosGeneracion) return;
-    const delServidor = deduplicarPedidosPorId(
-      (Array.isArray(data.orders) ? data.orders : []).map(normalizarPedidoEnMemoria)
-    );
-    const clavesServidor = new Set(delServidor.map((p) => clavePedido(p)).filter(Boolean));
-    const soloLocal = (pedidos || []).filter((p) => {
-      const k = clavePedido(p);
-      return k && !clavesServidor.has(k);
-    });
-    if (soloLocal.length > 0 && !edicionPedidosEnEstaSesion) {
-      pedidos = deduplicarPedidosPorId(delServidor.concat(soloLocal));
-      guardarCachePedidos();
-      edicionPedidosEnEstaSesion = true;
-      marcarEdicionLocalPedidos();
-      marcarPedidosSyncPendiente(true);
-      try {
-        await syncPedidosAlServidor();
-      } catch (e) {
-        console.error(e);
-      }
-      renderPedidos();
-      actualizarMarcadores({ conservarVista: true });
-      return;
-    }
+    if (edicionPedidosEnEstaSesion) return;
     aplicarPedidosDesdeServidor(data.orders);
     const serverRev = Number(data.clientRevision || 0) || 0;
     if (serverRev > 0) {
@@ -3491,21 +3474,60 @@ async function procesarMultiplesPedidos(texto) {
 
 let edicionPedidosEnEstaSesion = false;
 const pedidosCreadosEnSesion = new Set();
+const pedidosEliminadosEnSesion = new Set();
+let pedidosEliminadosCargados = false;
 
 function recordarPedidoCreadoEnSesion(pedido) {
   const k = clavePedido(pedido);
   if (k) pedidosCreadosEnSesion.add(k);
 }
 
+function claveBorradosPedidos() {
+  const uid = sesionUsuario?.id || getAuthActiveUserId() || '0';
+  return `deliveryPedidosBorrados_v1_${uid}`;
+}
+
+function asegurarPedidosEliminadosCargados() {
+  if (pedidosEliminadosCargados) return;
+  pedidosEliminadosCargados = true;
+  try {
+    const raw = sessionStorage.getItem(claveBorradosPedidos());
+    const arr = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(arr)) arr.forEach((id) => pedidosEliminadosEnSesion.add(String(id)));
+  } catch (_e) {}
+}
+
+function recordarPedidoEliminado(pedido) {
+  const sid = Number(pedido && pedido.storageId);
+  const id = Number.isFinite(sid) && sid > 0 ? sid : idAlmacenPedido(pedido);
+  if (id) pedidosEliminadosEnSesion.add(String(id));
+  const k = clavePedido(pedido);
+  if (k) pedidosCreadosEnSesion.delete(k);
+  try {
+    sessionStorage.setItem(claveBorradosPedidos(), JSON.stringify([...pedidosEliminadosEnSesion]));
+  } catch (_e) {}
+}
+
+function pedidoEstaEliminado(pedido) {
+  asegurarPedidosEliminadosCargados();
+  const sid = Number(pedido && pedido.storageId);
+  if (Number.isFinite(sid) && sid > 0 && pedidosEliminadosEnSesion.has(String(sid))) return true;
+  return false;
+}
+
+function filtrarPedidosEliminados(lista) {
+  return (Array.isArray(lista) ? lista : []).filter((p) => !pedidoEstaEliminado(p));
+}
+
 function mezclarPedidosCreadosEnSesion(lista) {
   const base = Array.isArray(lista) ? lista.slice() : [];
   if (!pedidosCreadosEnSesion.size) return base;
-  const keys = new Set(base.map((p) => clavePedido(p)).filter(Boolean));
   for (const p of pedidos) {
     const k = clavePedido(p);
-    if (!k || !pedidosCreadosEnSesion.has(k) || keys.has(k)) continue;
-    base.push(p);
-    keys.add(k);
+    if (!k || !pedidosCreadosEnSesion.has(k) || pedidoEstaEliminado(p)) continue;
+    const idx = base.findIndex((x) => clavePedido(x) === k);
+    if (idx >= 0) base[idx] = p;
+    else base.push(p);
   }
   return base;
 }
@@ -4919,6 +4941,7 @@ function quitarPedidoDeLaLista(pedido) {
   const ix = pedidos.findIndex((p) => idAlmacenPedido(p) === sid && idTiendaPedido(p) === tid);
   if (ix < 0) return;
   const copia = pedidos[ix];
+  recordarPedidoEliminado(copia);
   pedidos.splice(ix, 1);
   guardarPedidos();
   renderPedidos();
