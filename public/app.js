@@ -2500,7 +2500,10 @@ function construirMensajeNotificarVendedorTelefono(pedido) {
 function actualizarBannerAvisosTelefono() {
   const host = document.getElementById('bannerAvisosTelefono');
   if (!host) return;
-  const pendientes = pedidos.filter((p) => p && p.avisoTelefono && !p.cancelado);
+  const tid = String(tiendaActivaId || TIENDA_DEFAULT_ID);
+  const pendientes = pedidos.filter(
+    (p) => p && p.avisoTelefono && !p.cancelado && idTiendaPedido(p) === tid
+  );
   if (!pendientes.length) {
     host.style.display = 'none';
     host.innerHTML = '';
